@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { TIMEFRAMES, RSI_PERIODS, TOP_CRYPTOS, SYMBOL_NAMES, RSIData } from '@/lib/binance';
 import { calculateRSI } from '@/lib/rsi';
+import { calculateConfluence, isExtreme, type ScannerResult } from '@/lib/analysis';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -29,7 +30,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Star, Search, RefreshCw, TrendingUp, TrendingDown, Minus, Bell, BellRing } from 'lucide-react';
+import { Star, Search, RefreshCw, TrendingUp, TrendingDown, Minus, Bell, BellRing, Zap, Radar } from 'lucide-react';
 
 // Types
 interface Alert {
@@ -571,6 +572,8 @@ export default function Home() {
   const [notificationLogs, setNotificationLogs] = useState<NotificationLog[]>([]);
   const [visibleRSI, setVisibleRSI] = useState<number[]>([5, 9, 14, 50, 75, 100, 200]);
   const [visibleTF, setVisibleTF] = useState<string[]>(TIMEFRAMES.map(t => t.label));
+  const [scannerResults, setScannerResults] = useState<ScannerResult[]>([]);
+  const [scanning, setScanning] = useState(false);
   const triggeredAlertsRef = useRef<Set<string>>(new Set());
 
   const addNotificationLog = useCallback((log: NotificationLog) => {
@@ -721,6 +724,84 @@ export default function Home() {
 
   const hasAlerts = (symbol: string) => alerts.some(a => a.symbol === symbol + 'USDT' && a.enabled);
 
+  // Scanner function - find extreme RSI across all pairs
+  const runScanner = useCallback(async () => {
+    setScanning(true);
+    try {
+      // Get all USDT pairs
+      const infoRes = await fetch('https://api.binance.com/api/v3/exchangeInfo');
+      const infoData = await infoRes.json();
+      const usdtPairs = infoData.symbols
+        .filter((s: { status: string; quoteAsset: string }) => 
+          s.status === 'TRADING' && s.quoteAsset === 'USDT'
+        )
+        .map((s: { symbol: string }) => s.symbol)
+        .slice(0, 100); // Limit to top 100 for speed
+
+      // Get prices
+      const pricesRes = await fetch('https://api.binance.com/api/v3/ticker/price');
+      const pricesData = await pricesRes.json();
+      const priceMap: Record<string, number> = {};
+      for (const p of pricesData) {
+        priceMap[p.symbol] = parseFloat(p.price);
+      }
+
+      const results: ScannerResult[] = [];
+
+      // Check each pair for extremes (only 4h and 1d for speed)
+      for (const symbol of usdtPairs) {
+        const extremes: ScannerResult['extremes'] = [];
+        
+        for (const tf of [{ label: '4h', interval: '4h' }, { label: '1d', interval: '1d' }]) {
+          try {
+            const res = await fetch(
+              `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${tf.interval}&limit=100`
+            );
+            const klines = await res.json();
+            if (!Array.isArray(klines)) continue;
+            
+            const closes = klines.map((k: (string | number)[]) => parseFloat(String(k[4])));
+            
+            for (const period of [14, 50]) {
+              const rsi = calculateRSI(closes, period);
+              const extreme = isExtreme(rsi);
+              if (extreme && rsi !== null) {
+                extremes.push({
+                  timeframe: tf.label,
+                  rsiPeriod: period,
+                  value: rsi,
+                  type: extreme
+                });
+              }
+            }
+          } catch {}
+        }
+
+        if (extremes.length >= 2) { // At least 2 extreme readings
+          results.push({
+            symbol: symbol.replace('USDT', ''),
+            name: SYMBOL_NAMES[symbol] || symbol.replace('USDT', ''),
+            price: priceMap[symbol] || 0,
+            extremes,
+            confluenceScore: extremes.filter(e => e.type === 'oversold').length - 
+                            extremes.filter(e => e.type === 'overbought').length
+          });
+        }
+
+        // Small delay to avoid rate limiting
+        await new Promise(r => setTimeout(r, 50));
+      }
+
+      // Sort by confluence score
+      results.sort((a, b) => Math.abs(b.confluenceScore) - Math.abs(a.confluenceScore));
+      setScannerResults(results.slice(0, 20));
+    } catch (e) {
+      console.error('Scanner error:', e);
+    } finally {
+      setScanning(false);
+    }
+  }, []);
+
   return (
     <main className="min-h-screen bg-zinc-950 text-white">
       {/* Header */}
@@ -789,6 +870,10 @@ export default function Home() {
                 <span className="flex items-center gap-1">
                   <BellRing className="h-3 w-3 text-blue-400" />
                   Alert
+                </span>
+                <span className="flex items-center gap-1">
+                  <Zap className="h-3 w-3 text-yellow-400" />
+                  Confluence (3+ TF)
                 </span>
               </div>
             </div>
@@ -892,10 +977,17 @@ export default function Home() {
                 {sortedData.map((crypto) => {
                   const isFav = favorites.includes(crypto.symbol + 'USDT');
                   const hasAlert = hasAlerts(crypto.symbol);
+                  const confluence = calculateConfluence(crypto, 14, ['1h', '4h', '1d', '1w']);
+                  const isStrong = confluence.signal === 'strong_buy' || confluence.signal === 'strong_sell';
                   return (
                     <TableRow 
                       key={crypto.symbol}
-                      className={`border-zinc-800/50 cursor-pointer transition-colors hover:bg-zinc-900/50 ${isFav ? 'bg-yellow-500/5' : ''}`}
+                      className={`border-zinc-800/50 cursor-pointer transition-colors hover:bg-zinc-900/50 ${
+                        isFav ? 'bg-yellow-500/5' : ''
+                      } ${
+                        confluence.signal === 'strong_buy' ? 'bg-emerald-900/20 hover:bg-emerald-900/30' : 
+                        confluence.signal === 'strong_sell' ? 'bg-red-900/20 hover:bg-red-900/30' : ''
+                      }`}
                       onClick={() => setSelectedCrypto(crypto)}
                     >
                       <TableCell className={`w-10 sticky left-0 z-10 ${isFav ? 'bg-yellow-950/30' : 'bg-zinc-950'}`} onClick={(e) => e.stopPropagation()}>
@@ -926,8 +1018,24 @@ export default function Home() {
                         <div className="font-semibold text-white">{crypto.symbol}</div>
                         <div className="text-xs text-zinc-400">{crypto.name}</div>
                       </TableCell>
-                      <TableCell className={`text-right font-mono text-sm text-white pr-4 sticky left-[180px] z-10 min-w-[90px] shadow-[4px_0_8px_-2px_rgba(0,0,0,0.8)] ${isFav ? 'bg-yellow-950/30' : 'bg-zinc-950'}`}>
-                        ${formatPrice(crypto.price)}
+                      <TableCell className={`text-right font-mono text-sm text-white pr-2 sticky left-[180px] z-10 min-w-[120px] shadow-[4px_0_8px_-2px_rgba(0,0,0,0.8)] ${
+                          isFav ? 'bg-yellow-950/30' : 
+                          confluence.signal === 'strong_buy' ? 'bg-emerald-900/20' :
+                          confluence.signal === 'strong_sell' ? 'bg-red-900/20' : 'bg-zinc-950'
+                        }`}>
+                        <div className="flex items-center justify-end gap-2">
+                          <span>${formatPrice(crypto.price)}</span>
+                          {isStrong && (
+                            <span className={`flex items-center gap-0.5 text-xs px-1.5 py-0.5 rounded ${
+                              confluence.signal === 'strong_buy' 
+                                ? 'bg-emerald-600 text-white' 
+                                : 'bg-red-600 text-white'
+                            }`}>
+                              <Zap className="h-3 w-3" />
+                              {confluence.oversoldCount || confluence.overboughtCount}
+                            </span>
+                          )}
+                        </div>
                       </TableCell>
                       {RSI_PERIODS.filter(p => visibleRSI.includes(p)).map((period, idx) => (
                         TIMEFRAMES.filter(tf => visibleTF.includes(tf.label)).map((tf, tfIdx) => (
@@ -952,6 +1060,106 @@ export default function Home() {
         <p className="text-center text-xs text-zinc-500 mt-4">
           Binance data • Grok AI • Auto-refresh 60s
         </p>
+
+        {/* Scanner Section */}
+        <div className="mt-6 border border-zinc-800 rounded-lg overflow-hidden">
+          <div className="bg-zinc-900 px-4 py-3 flex items-center justify-between border-b border-zinc-800">
+            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+              <Radar className="h-4 w-4 text-purple-400" />
+              Market Scanner - Extreme RSI
+            </h3>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={runScanner}
+              disabled={scanning}
+              className="gap-2 border-purple-600 text-purple-400 hover:bg-purple-900/20"
+            >
+              {scanning ? (
+                <>
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  Scanning...
+                </>
+              ) : (
+                <>
+                  <Radar className="h-4 w-4" />
+                  Scan Market
+                </>
+              )}
+            </Button>
+          </div>
+          
+          {scannerResults.length > 0 ? (
+            <div className="max-h-64 overflow-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-zinc-900/50 border-zinc-800">
+                    <TableHead className="text-white">Coin</TableHead>
+                    <TableHead className="text-white text-right">Price</TableHead>
+                    <TableHead className="text-white text-center">Signal</TableHead>
+                    <TableHead className="text-white">Extreme RSI</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {scannerResults.map((result) => (
+                    <TableRow 
+                      key={result.symbol}
+                      className={`border-zinc-800/50 cursor-pointer hover:bg-zinc-900/50 ${
+                        result.confluenceScore > 0 ? 'bg-emerald-900/10' : 'bg-red-900/10'
+                      }`}
+                      onClick={() => {
+                        // Add to favorites and fetch data
+                        const fullSymbol = result.symbol + 'USDT';
+                        if (!favorites.includes(fullSymbol)) {
+                          setFavorites(prev => [...prev, fullSymbol]);
+                        }
+                      }}
+                    >
+                      <TableCell>
+                        <div className="font-semibold text-white">{result.symbol}</div>
+                        <div className="text-xs text-zinc-400">{result.name}</div>
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-sm text-white">
+                        ${formatPrice(result.price)}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <span className={`px-2 py-1 rounded text-xs font-bold ${
+                          result.confluenceScore > 0 
+                            ? 'bg-emerald-600 text-white' 
+                            : 'bg-red-600 text-white'
+                        }`}>
+                          {result.confluenceScore > 0 ? '🟢 OVERSOLD' : '🔴 OVERBOUGHT'}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1">
+                          {result.extremes.map((e, i) => (
+                            <span 
+                              key={i}
+                              className={`text-xs px-1.5 py-0.5 rounded ${
+                                e.type === 'oversold' 
+                                  ? 'bg-emerald-800 text-emerald-200' 
+                                  : 'bg-red-800 text-red-200'
+                              }`}
+                            >
+                              {e.timeframe} RSI{e.rsiPeriod}: {e.value.toFixed(1)}
+                            </span>
+                          ))}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          ) : (
+            <div className="px-4 py-8 text-center text-zinc-500">
+              <Radar className="h-8 w-8 mx-auto mb-2 opacity-50" />
+              <p>Click "Scan Market" to find coins with extreme RSI</p>
+              <p className="text-xs mt-1">Scans top 100 pairs on 4h & 1d timeframes</p>
+            </div>
+          )}
+        </div>
 
         {/* Notification Log */}
         {notificationLogs.length > 0 && (
