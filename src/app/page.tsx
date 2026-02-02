@@ -468,13 +468,13 @@ export default function Home() {
               <TableHeader>
                 <TableRow className="bg-zinc-900/50 border-zinc-800 hover:bg-zinc-900/50">
                   <TableHead className="w-10"></TableHead>
-                  <TableHead className="font-semibold">Asset</TableHead>
-                  <TableHead className="text-right font-semibold">Price</TableHead>
+                  <TableHead className="font-semibold text-white">Asset</TableHead>
+                  <TableHead className="text-right font-semibold text-white">Price</TableHead>
                   {TIMEFRAMES.map(tf => (
                     <TableHead 
                       key={tf.label} 
                       colSpan={RSI_PERIODS.length} 
-                      className="text-center font-semibold border-l border-zinc-800"
+                      className="text-center font-semibold border-l border-zinc-800 text-white"
                     >
                       {tf.label}
                     </TableHead>
@@ -488,7 +488,7 @@ export default function Home() {
                     RSI_PERIODS.map(period => (
                       <TableHead 
                         key={`${tf.label}-${period}`} 
-                        className="text-center text-xs text-muted-foreground font-normal py-1"
+                        className="text-center text-xs text-zinc-400 font-normal py-1"
                       >
                         {period}
                       </TableHead>
@@ -516,10 +516,10 @@ export default function Home() {
                         </Button>
                       </TableCell>
                       <TableCell>
-                        <div className="font-semibold">{crypto.symbol}</div>
-                        <div className="text-xs text-muted-foreground">{crypto.name}</div>
+                        <div className="font-semibold text-white">{crypto.symbol}</div>
+                        <div className="text-xs text-zinc-400">{crypto.name}</div>
                       </TableCell>
-                      <TableCell className="text-right font-mono text-sm">
+                      <TableCell className="text-right font-mono text-sm text-white">
                         ${formatPrice(crypto.price)}
                       </TableCell>
                       {TIMEFRAMES.map(tf => (
