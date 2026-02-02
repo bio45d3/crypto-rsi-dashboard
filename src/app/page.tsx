@@ -277,30 +277,30 @@ function AnalysisModal({
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
 
+  // Reset result when crypto changes
   useEffect(() => {
-    if (!crypto || !open) return;
-    
-    async function analyze() {
-      setLoading(true);
-      setResult(null);
-      try {
-        const res = await fetch('/api/analyze', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cryptoData: crypto })
-        });
-        if (res.ok) {
-          setResult(await res.json());
-        }
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setLoading(false);
+    setResult(null);
+  }, [crypto]);
+
+  const runAnalysis = async () => {
+    if (!crypto) return;
+    setLoading(true);
+    setResult(null);
+    try {
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cryptoData: crypto })
+      });
+      if (res.ok) {
+        setResult(await res.json());
       }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
     }
-    
-    analyze();
-  }, [crypto, open]);
+  };
 
   if (!crypto) return null;
 
@@ -325,85 +325,93 @@ function AnalysisModal({
           </DialogTitle>
         </DialogHeader>
 
-        {loading ? (
-          <div className="flex flex-col items-center justify-center py-12">
-            <RefreshCw className="h-8 w-8 animate-spin text-zinc-500 mb-3" />
-            <p className="text-zinc-400">Analyzing with Grok...</p>
-          </div>
-        ) : result ? (
-          <div className="space-y-4">
-            {/* Signal */}
-            <div className="flex items-center gap-3 flex-wrap">
-              {(() => {
-                const config = signalConfig[result.signals.type];
-                const Icon = config.icon;
-                return (
-                  <Badge className={`${config.color} text-white px-3 py-1`}>
-                    <Icon className="h-4 w-4 mr-1" />
-                    {config.label}
-                  </Badge>
-                );
-              })()}
-              <Badge className={result.signals.urgency === 'high' ? 'bg-red-600 text-white' : 'bg-zinc-700 text-white'}>
-                {result.signals.urgency.toUpperCase()} URGENCY
-              </Badge>
-              <Badge className="bg-zinc-700 text-white border border-zinc-600">
-                {result.signals.strength.toUpperCase()}
-              </Badge>
-            </div>
-
-            {/* Analysis */}
-            <div className="bg-zinc-900 rounded-lg p-4 border border-zinc-800">
-              <p className="text-sm text-zinc-400 mb-2">🤖 Grok Analysis</p>
-              <p className="text-white leading-relaxed">{result.analysis}</p>
-            </div>
-
-            {/* Observations */}
-            {result.signals.reasons.length > 0 && (
-              <div className="bg-zinc-900/50 rounded-lg p-4 border border-zinc-800/50">
-                <p className="text-sm text-zinc-400 mb-2">📊 Key Observations</p>
-                <ul className="space-y-1">
-                  {result.signals.reasons.map((r, i) => (
-                    <li key={i} className="text-sm text-white flex gap-2">
-                      <span className="text-blue-400">•</span> {r}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {/* RSI Table */}
-            <div className="bg-zinc-900/30 rounded-lg p-4 border border-zinc-800/30">
-              <p className="text-sm text-zinc-400 mb-3">📈 RSI Overview</p>
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="border-zinc-800">
-                      <TableHead className="w-16 text-white">TF</TableHead>
-                      {RSI_PERIODS.map(p => (
-                        <TableHead key={p} className="text-center text-white">RSI{p}</TableHead>
+        <div className="space-y-4">
+          {/* RSI Table - Always shown */}
+          <div className="bg-zinc-900/30 rounded-lg p-4 border border-zinc-800/30">
+            <p className="text-sm text-zinc-400 mb-3">📈 RSI Overview</p>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-zinc-800">
+                    <TableHead className="w-16 text-white">TF</TableHead>
+                    {RSI_PERIODS.map(p => (
+                      <TableHead key={p} className="text-center text-white">RSI{p}</TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {TIMEFRAMES.map(tf => (
+                    <TableRow key={tf.label} className="border-zinc-800/50">
+                      <TableCell className="font-medium text-white">{tf.label}</TableCell>
+                      {RSI_PERIODS.map(period => (
+                        <TableCell key={period} className="text-center">
+                          <RSICell value={crypto.timeframes[tf.label]?.[period] ?? null} />
+                        </TableCell>
                       ))}
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {TIMEFRAMES.map(tf => (
-                      <TableRow key={tf.label} className="border-zinc-800/50">
-                        <TableCell className="font-medium text-white">{tf.label}</TableCell>
-                        {RSI_PERIODS.map(period => (
-                          <TableCell key={period} className="text-center">
-                            <RSICell value={crypto.timeframes[tf.label]?.[period] ?? null} />
-                          </TableCell>
-                        ))}
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
           </div>
-        ) : (
-          <p className="text-zinc-400 text-center py-8">Failed to analyze</p>
-        )}
+
+          {/* Grok Analysis - On Demand */}
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-8 bg-zinc-900/50 rounded-lg border border-zinc-800">
+              <RefreshCw className="h-8 w-8 animate-spin text-zinc-500 mb-3" />
+              <p className="text-zinc-400">Analyzing with Grok...</p>
+            </div>
+          ) : result ? (
+            <div className="space-y-3">
+              {/* Signal */}
+              <div className="flex items-center gap-3 flex-wrap">
+                {(() => {
+                  const config = signalConfig[result.signals.type];
+                  const Icon = config.icon;
+                  return (
+                    <Badge className={`${config.color} text-white px-3 py-1`}>
+                      <Icon className="h-4 w-4 mr-1" />
+                      {config.label}
+                    </Badge>
+                  );
+                })()}
+                <Badge className={result.signals.urgency === 'high' ? 'bg-red-600 text-white' : 'bg-zinc-700 text-white'}>
+                  {result.signals.urgency.toUpperCase()} URGENCY
+                </Badge>
+                <Badge className="bg-zinc-700 text-white border border-zinc-600">
+                  {result.signals.strength.toUpperCase()}
+                </Badge>
+              </div>
+
+              {/* Analysis */}
+              <div className="bg-zinc-900 rounded-lg p-4 border border-zinc-800">
+                <p className="text-sm text-zinc-400 mb-2">🤖 Grok Analysis</p>
+                <p className="text-white leading-relaxed">{result.analysis}</p>
+              </div>
+
+              {/* Observations */}
+              {result.signals.reasons.length > 0 && (
+                <div className="bg-zinc-900/50 rounded-lg p-4 border border-zinc-800/50">
+                  <p className="text-sm text-zinc-400 mb-2">📊 Key Observations</p>
+                  <ul className="space-y-1">
+                    {result.signals.reasons.map((r, i) => (
+                      <li key={i} className="text-sm text-white flex gap-2">
+                        <span className="text-blue-400">•</span> {r}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          ) : (
+            <Button 
+              onClick={runAnalysis}
+              className="w-full bg-blue-600 hover:bg-blue-700"
+            >
+              🤖 Analyze with Grok AI
+            </Button>
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   );
