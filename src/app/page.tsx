@@ -841,22 +841,24 @@ export default function Home() {
   const runScanner = useCallback(async () => {
     setScanning(true);
     try {
-      // Get all USDT pairs
-      const infoRes = await fetch('https://api.binance.com/api/v3/exchangeInfo');
-      const infoData = await infoRes.json();
-      const usdtPairs = infoData.symbols
-        .filter((s: { status: string; quoteAsset: string }) => 
-          s.status === 'TRADING' && s.quoteAsset === 'USDT'
+      // Get 24hr ticker data (includes volume) and sort by volume for top 100
+      const tickerRes = await fetch('https://api.binance.com/api/v3/ticker/24hr');
+      const tickerData = await tickerRes.json();
+      
+      // Filter USDT pairs and sort by 24h quote volume
+      const usdtTickers = tickerData
+        .filter((t: { symbol: string }) => t.symbol.endsWith('USDT'))
+        .sort((a: { quoteVolume: string }, b: { quoteVolume: string }) => 
+          parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume)
         )
-        .map((s: { symbol: string }) => s.symbol)
-        .slice(0, 100); // Limit to top 100 for speed
-
-      // Get prices
-      const pricesRes = await fetch('https://api.binance.com/api/v3/ticker/price');
-      const pricesData = await pricesRes.json();
+        .slice(0, 100); // Top 100 by volume
+      
+      const usdtPairs = usdtTickers.map((t: { symbol: string }) => t.symbol);
+      
+      // Build price map from ticker data
       const priceMap: Record<string, number> = {};
-      for (const p of pricesData) {
-        priceMap[p.symbol] = parseFloat(p.price);
+      for (const t of tickerData) {
+        priceMap[t.symbol] = parseFloat(t.lastPrice);
       }
 
       const results: ScannerResult[] = [];
