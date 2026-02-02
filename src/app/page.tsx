@@ -475,13 +475,13 @@ export default function Home() {
                   <TableHead className="w-10"></TableHead>
                   <TableHead className="font-semibold text-white">Asset</TableHead>
                   <TableHead className="text-right font-semibold text-white">Price</TableHead>
-                  {TIMEFRAMES.map(tf => (
+                  {RSI_PERIODS.map(period => (
                     <TableHead 
-                      key={tf.label} 
-                      colSpan={RSI_PERIODS.length} 
+                      key={period} 
+                      colSpan={TIMEFRAMES.length} 
                       className="text-center font-semibold border-l border-zinc-800 text-white"
                     >
-                      {tf.label}
+                      RSI{period}
                     </TableHead>
                   ))}
                 </TableRow>
@@ -489,13 +489,13 @@ export default function Home() {
                   <TableHead></TableHead>
                   <TableHead></TableHead>
                   <TableHead></TableHead>
-                  {TIMEFRAMES.map(tf => (
-                    RSI_PERIODS.map(period => (
+                  {RSI_PERIODS.map(period => (
+                    TIMEFRAMES.map(tf => (
                       <TableHead 
-                        key={`${tf.label}-${period}`} 
+                        key={`${period}-${tf.label}`} 
                         className="text-center text-xs text-zinc-400 font-normal py-1"
                       >
-                        {period}
+                        {tf.label}
                       </TableHead>
                     ))
                   ))}
@@ -527,10 +527,10 @@ export default function Home() {
                       <TableCell className="text-right font-mono text-sm text-white">
                         ${formatPrice(crypto.price)}
                       </TableCell>
-                      {TIMEFRAMES.map(tf => (
-                        RSI_PERIODS.map(period => (
+                      {RSI_PERIODS.map(period => (
+                        TIMEFRAMES.map(tf => (
                           <TableCell 
-                            key={`${crypto.symbol}-${tf.label}-${period}`} 
+                            key={`${crypto.symbol}-${period}-${tf.label}`} 
                             className="text-center py-2"
                           >
                             <RSICell value={crypto.timeframes[tf.label]?.[period] ?? null} />
