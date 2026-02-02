@@ -1131,8 +1131,8 @@ export default function Home() {
           }
         }
 
-        // Only add if there's a signal with decent confidence
-        if (signal && confidence >= 50) {
+        // Add if there's a signal OR if there's a valid bias (show setup status)
+        if (signal && confidence >= 40) {
           results.push({
             symbol: symbol.replace('USDT', ''),
             swingBias,
@@ -1144,12 +1144,33 @@ export default function Home() {
             timeframes,
             divergence: null
           });
+        } else if (swingBias !== 'no_trade' || scalpBias !== 'no_trade') {
+          // Show coins with valid bias even without signal (watching)
+          results.push({
+            symbol: symbol.replace('USDT', ''),
+            swingBias,
+            scalpBias,
+            regime,
+            signal: null,
+            confidence: 0,
+            reasons: [
+              swingBias !== 'no_trade' ? `Swing bias: ${swingBias.replace('_', ' ')}` : 'No swing bias',
+              scalpBias !== 'no_trade' ? `Scalp bias: ${scalpBias.replace('_', ' ')}` : 'No scalp bias',
+              `Waiting for setup/trigger...`
+            ],
+            timeframes,
+            divergence: null
+          });
         }
       }
 
-      // Sort by confidence
-      results.sort((a, b) => b.confidence - a.confidence);
-      setSignalResults(results.slice(0, 20));
+      // Sort: signals first by confidence, then watching coins
+      results.sort((a, b) => {
+        if (a.signal && !b.signal) return -1;
+        if (!a.signal && b.signal) return 1;
+        return b.confidence - a.confidence;
+      });
+      setSignalResults(results.slice(0, 30));
     } catch (e) {
       console.error('Signal scanner error:', e);
     } finally {
@@ -1722,7 +1743,8 @@ export default function Home() {
                     <TableRow 
                       key={result.symbol}
                       className={`border-zinc-800/50 cursor-pointer hover:bg-zinc-900/50 ${
-                        result.signal?.includes('long') ? 'bg-emerald-900/10' : 'bg-red-900/10'
+                        result.signal?.includes('long') ? 'bg-emerald-900/10' : 
+                        result.signal?.includes('short') ? 'bg-red-900/10' : ''
                       }`}
                       onClick={() => setSelectedSignal(result)}
                     >
@@ -1735,13 +1757,13 @@ export default function Home() {
                           result.signal === 'swing_short' ? 'bg-red-600 text-white' :
                           result.signal === 'scalp_long' ? 'bg-emerald-700 text-white' :
                           result.signal === 'scalp_short' ? 'bg-red-700 text-white' :
-                          'bg-zinc-700 text-white'
+                          'bg-zinc-700/50 text-zinc-400'
                         }`}>
                           {result.signal === 'swing_long' ? '🟢 SWING LONG' :
                            result.signal === 'swing_short' ? '🔴 SWING SHORT' :
                            result.signal === 'scalp_long' ? '🟢 SCALP LONG' :
                            result.signal === 'scalp_short' ? '🔴 SCALP SHORT' :
-                           'NONE'}
+                           '👁 WATCHING'}
                         </span>
                       </TableCell>
                       <TableCell className="text-center">
