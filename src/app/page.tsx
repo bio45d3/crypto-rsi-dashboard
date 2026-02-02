@@ -856,7 +856,7 @@ export default function Home() {
                   <TableHead className="w-10 sticky left-0 bg-zinc-900 z-20"></TableHead>
                   <TableHead className="w-10 sticky left-10 bg-zinc-900 z-20"></TableHead>
                   <TableHead className="font-semibold text-white sticky left-20 bg-zinc-900 z-20 min-w-[100px]">Asset</TableHead>
-                  <TableHead className="text-right font-semibold text-white pr-4 sticky left-[180px] bg-zinc-900 z-20 min-w-[90px] border-r-2 border-zinc-600">Price</TableHead>
+                  <TableHead className="text-right font-semibold text-white pr-4 sticky left-[180px] bg-zinc-900 z-20 min-w-[90px] shadow-[4px_0_8px_-2px_rgba(0,0,0,0.8)]">Price</TableHead>
                   {RSI_PERIODS.filter(p => visibleRSI.includes(p)).map((period, idx) => (
                     <TableHead 
                       key={period} 
@@ -870,10 +870,10 @@ export default function Home() {
                   ))}
                 </TableRow>
                 <TableRow className="bg-zinc-900/60 border-zinc-800 hover:bg-zinc-900/60">
-                  <TableHead className="sticky left-0 bg-zinc-900/60 z-20"></TableHead>
-                  <TableHead className="sticky left-10 bg-zinc-900/60 z-20"></TableHead>
-                  <TableHead className="sticky left-20 bg-zinc-900/60 z-20"></TableHead>
-                  <TableHead className="pr-4 sticky left-[180px] bg-zinc-900/60 z-20 border-r-2 border-zinc-600"></TableHead>
+                  <TableHead className="sticky left-0 bg-zinc-900 z-20"></TableHead>
+                  <TableHead className="sticky left-10 bg-zinc-900 z-20"></TableHead>
+                  <TableHead className="sticky left-20 bg-zinc-900 z-20"></TableHead>
+                  <TableHead className="pr-4 sticky left-[180px] bg-zinc-900 z-20 shadow-[4px_0_8px_-2px_rgba(0,0,0,0.8)]"></TableHead>
                   {RSI_PERIODS.filter(p => visibleRSI.includes(p)).map((period, idx) => (
                     TIMEFRAMES.filter(tf => visibleTF.includes(tf.label)).map((tf, tfIdx) => (
                       <TableHead 
@@ -898,7 +898,7 @@ export default function Home() {
                       className={`border-zinc-800/50 cursor-pointer transition-colors hover:bg-zinc-900/50 ${isFav ? 'bg-yellow-500/5' : ''}`}
                       onClick={() => setSelectedCrypto(crypto)}
                     >
-                      <TableCell className="w-10 sticky left-0 bg-zinc-950 z-10" onClick={(e) => e.stopPropagation()}>
+                      <TableCell className={`w-10 sticky left-0 z-10 ${isFav ? 'bg-yellow-950/30' : 'bg-zinc-950'}`} onClick={(e) => e.stopPropagation()}>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -908,7 +908,7 @@ export default function Home() {
                           <Star className={`h-4 w-4 ${isFav ? 'fill-yellow-500 text-yellow-500' : 'text-zinc-600'}`} />
                         </Button>
                       </TableCell>
-                      <TableCell className="w-10 sticky left-10 bg-zinc-950 z-10" onClick={(e) => e.stopPropagation()}>
+                      <TableCell className={`w-10 sticky left-10 z-10 ${isFav ? 'bg-yellow-950/30' : 'bg-zinc-950'}`} onClick={(e) => e.stopPropagation()}>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -922,11 +922,11 @@ export default function Home() {
                           )}
                         </Button>
                       </TableCell>
-                      <TableCell className="sticky left-20 bg-zinc-950 z-10 min-w-[100px]">
+                      <TableCell className={`sticky left-20 z-10 min-w-[100px] ${isFav ? 'bg-yellow-950/30' : 'bg-zinc-950'}`}>
                         <div className="font-semibold text-white">{crypto.symbol}</div>
                         <div className="text-xs text-zinc-400">{crypto.name}</div>
                       </TableCell>
-                      <TableCell className="text-right font-mono text-sm text-white pr-4 sticky left-[180px] bg-zinc-950 z-10 min-w-[90px] border-r-2 border-zinc-600">
+                      <TableCell className={`text-right font-mono text-sm text-white pr-4 sticky left-[180px] z-10 min-w-[90px] shadow-[4px_0_8px_-2px_rgba(0,0,0,0.8)] ${isFav ? 'bg-yellow-950/30' : 'bg-zinc-950'}`}>
                         ${formatPrice(crypto.price)}
                       </TableCell>
                       {RSI_PERIODS.filter(p => visibleRSI.includes(p)).map((period, idx) => (
