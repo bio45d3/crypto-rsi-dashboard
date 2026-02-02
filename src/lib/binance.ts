@@ -26,7 +26,7 @@ export const TIMEFRAMES = [
   { label: '1w', interval: '1w', limit: 250 },
 ];
 
-export const RSI_PERIODS = [14, 50, 75, 100, 200];
+export const RSI_PERIODS = [5, 9, 14, 50, 75, 100, 200];
 
 export interface RSIData {
   symbol: string;

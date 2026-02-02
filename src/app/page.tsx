@@ -569,7 +569,8 @@ export default function Home() {
   const [priceMap, setPriceMap] = useState<Record<string, number>>({});
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [notificationLogs, setNotificationLogs] = useState<NotificationLog[]>([]);
-  const [visibleRSI, setVisibleRSI] = useState<number[]>([14, 50, 75, 100, 200]);
+  const [visibleRSI, setVisibleRSI] = useState<number[]>([5, 9, 14, 50, 75, 100, 200]);
+  const [visibleTF, setVisibleTF] = useState<string[]>(TIMEFRAMES.map(t => t.label));
   const triggeredAlertsRef = useRef<Set<string>>(new Set());
 
   const addNotificationLog = useCallback((log: NotificationLog) => {
@@ -769,47 +770,77 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Legend & RSI Toggles */}
-          <div className="flex items-center justify-between mt-3 flex-wrap gap-2">
-            <div className="flex items-center gap-4 text-xs text-zinc-400">
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                Oversold
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-red-500" />
-                Overbought
-              </span>
-              <span className="flex items-center gap-1">
-                <Star className="h-3 w-3 fill-yellow-500 text-yellow-500" />
-                Fav
-              </span>
-              <span className="flex items-center gap-1">
-                <BellRing className="h-3 w-3 text-blue-400" />
-                Alert
-              </span>
+          {/* Legend & Toggles */}
+          <div className="flex flex-col gap-2 mt-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-3 text-xs text-zinc-400">
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                  Oversold
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-red-500" />
+                  Overbought
+                </span>
+                <span className="flex items-center gap-1">
+                  <Star className="h-3 w-3 fill-yellow-500 text-yellow-500" />
+                  Fav
+                </span>
+                <span className="flex items-center gap-1">
+                  <BellRing className="h-3 w-3 text-blue-400" />
+                  Alert
+                </span>
+              </div>
             </div>
             
-            {/* RSI Period Toggles */}
-            <div className="flex items-center gap-1">
-              <span className="text-xs text-zinc-500 mr-2">Show RSI:</span>
-              {RSI_PERIODS.map(period => (
-                <button
-                  key={period}
-                  onClick={() => setVisibleRSI(prev => 
-                    prev.includes(period) 
-                      ? prev.filter(p => p !== period)
-                      : [...prev, period].sort((a, b) => a - b)
-                  )}
-                  className={`px-2 py-1 text-xs rounded transition-colors ${
-                    visibleRSI.includes(period)
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-zinc-800 text-zinc-500 hover:bg-zinc-700'
-                  }`}
-                >
-                  {period}
-                </button>
-              ))}
+            {/* Toggles Row */}
+            <div className="flex items-center gap-4 flex-wrap">
+              {/* RSI Period Toggles */}
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-zinc-500 mr-1">RSI:</span>
+                {RSI_PERIODS.map(period => (
+                  <button
+                    key={period}
+                    onClick={() => setVisibleRSI(prev => 
+                      prev.includes(period) 
+                        ? prev.filter(p => p !== period)
+                        : [...prev, period].sort((a, b) => a - b)
+                    )}
+                    className={`px-2 py-1 text-xs rounded transition-colors ${
+                      visibleRSI.includes(period)
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-zinc-800 text-zinc-500 hover:bg-zinc-700'
+                    }`}
+                  >
+                    {period}
+                  </button>
+                ))}
+              </div>
+              
+              {/* Timeframe Toggles */}
+              <div className="flex items-center gap-1">
+                <span className="text-xs text-zinc-500 mr-1">TF:</span>
+                {TIMEFRAMES.map(tf => (
+                  <button
+                    key={tf.label}
+                    onClick={() => setVisibleTF(prev => 
+                      prev.includes(tf.label) 
+                        ? prev.filter(t => t !== tf.label)
+                        : [...prev, tf.label].sort((a, b) => {
+                            const order = TIMEFRAMES.map(t => t.label);
+                            return order.indexOf(a) - order.indexOf(b);
+                          })
+                    )}
+                    className={`px-2 py-1 text-xs rounded transition-colors ${
+                      visibleTF.includes(tf.label)
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-zinc-800 text-zinc-500 hover:bg-zinc-700'
+                    }`}
+                  >
+                    {tf.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </div>
@@ -822,14 +853,14 @@ export default function Home() {
             <Table>
               <TableHeader>
                 <TableRow className="bg-zinc-900 border-zinc-700 hover:bg-zinc-900">
-                  <TableHead className="w-10"></TableHead>
-                  <TableHead className="w-10"></TableHead>
-                  <TableHead className="font-semibold text-white">Asset</TableHead>
-                  <TableHead className="text-right font-semibold text-white pr-4">Price</TableHead>
+                  <TableHead className="w-10 sticky left-0 bg-zinc-900 z-20"></TableHead>
+                  <TableHead className="w-10 sticky left-10 bg-zinc-900 z-20"></TableHead>
+                  <TableHead className="font-semibold text-white sticky left-20 bg-zinc-900 z-20 min-w-[100px]">Asset</TableHead>
+                  <TableHead className="text-right font-semibold text-white pr-4 sticky left-[180px] bg-zinc-900 z-20 min-w-[90px] border-r-2 border-zinc-600">Price</TableHead>
                   {RSI_PERIODS.filter(p => visibleRSI.includes(p)).map((period, idx) => (
                     <TableHead 
                       key={period} 
-                      colSpan={TIMEFRAMES.length} 
+                      colSpan={visibleTF.length} 
                       className={`text-center font-semibold text-white py-3 ${
                         idx === 0 ? 'border-l-2 border-zinc-600' : 'border-l-2 border-zinc-700'
                       } ${idx % 2 === 0 ? 'bg-zinc-900' : 'bg-zinc-850'}`}
@@ -839,12 +870,12 @@ export default function Home() {
                   ))}
                 </TableRow>
                 <TableRow className="bg-zinc-900/60 border-zinc-800 hover:bg-zinc-900/60">
-                  <TableHead></TableHead>
-                  <TableHead></TableHead>
-                  <TableHead></TableHead>
-                  <TableHead className="pr-4"></TableHead>
+                  <TableHead className="sticky left-0 bg-zinc-900/60 z-20"></TableHead>
+                  <TableHead className="sticky left-10 bg-zinc-900/60 z-20"></TableHead>
+                  <TableHead className="sticky left-20 bg-zinc-900/60 z-20"></TableHead>
+                  <TableHead className="pr-4 sticky left-[180px] bg-zinc-900/60 z-20 border-r-2 border-zinc-600"></TableHead>
                   {RSI_PERIODS.filter(p => visibleRSI.includes(p)).map((period, idx) => (
-                    TIMEFRAMES.map((tf, tfIdx) => (
+                    TIMEFRAMES.filter(tf => visibleTF.includes(tf.label)).map((tf, tfIdx) => (
                       <TableHead 
                         key={`${period}-${tf.label}`} 
                         className={`text-center text-xs text-zinc-400 font-normal py-1 ${
@@ -867,7 +898,7 @@ export default function Home() {
                       className={`border-zinc-800/50 cursor-pointer transition-colors hover:bg-zinc-900/50 ${isFav ? 'bg-yellow-500/5' : ''}`}
                       onClick={() => setSelectedCrypto(crypto)}
                     >
-                      <TableCell className="w-10" onClick={(e) => e.stopPropagation()}>
+                      <TableCell className="w-10 sticky left-0 bg-zinc-950 z-10" onClick={(e) => e.stopPropagation()}>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -877,7 +908,7 @@ export default function Home() {
                           <Star className={`h-4 w-4 ${isFav ? 'fill-yellow-500 text-yellow-500' : 'text-zinc-600'}`} />
                         </Button>
                       </TableCell>
-                      <TableCell className="w-10" onClick={(e) => e.stopPropagation()}>
+                      <TableCell className="w-10 sticky left-10 bg-zinc-950 z-10" onClick={(e) => e.stopPropagation()}>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -891,15 +922,15 @@ export default function Home() {
                           )}
                         </Button>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="sticky left-20 bg-zinc-950 z-10 min-w-[100px]">
                         <div className="font-semibold text-white">{crypto.symbol}</div>
                         <div className="text-xs text-zinc-400">{crypto.name}</div>
                       </TableCell>
-                      <TableCell className="text-right font-mono text-sm text-white pr-4">
+                      <TableCell className="text-right font-mono text-sm text-white pr-4 sticky left-[180px] bg-zinc-950 z-10 min-w-[90px] border-r-2 border-zinc-600">
                         ${formatPrice(crypto.price)}
                       </TableCell>
                       {RSI_PERIODS.filter(p => visibleRSI.includes(p)).map((period, idx) => (
-                        TIMEFRAMES.map((tf, tfIdx) => (
+                        TIMEFRAMES.filter(tf => visibleTF.includes(tf.label)).map((tf, tfIdx) => (
                           <TableCell 
                             key={`${crypto.symbol}-${period}-${tf.label}`} 
                             className={`text-center py-2 ${
