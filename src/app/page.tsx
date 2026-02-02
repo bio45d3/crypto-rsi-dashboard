@@ -38,27 +38,27 @@ function formatPrice(price: number): string {
 }
 
 function RSICell({ value }: { value: number | null }) {
-  if (value === null) return <span className="text-muted-foreground">-</span>;
+  if (value === null) return <span className="text-zinc-500">-</span>;
   
-  let colorClass = 'text-muted-foreground';
-  let bgClass = 'bg-muted/30';
+  let colorClass = 'text-white';
+  let bgClass = 'bg-zinc-700';
   
   if (value < 30) {
-    colorClass = 'text-emerald-400';
-    bgClass = 'bg-emerald-500/20';
+    colorClass = 'text-white';
+    bgClass = 'bg-emerald-600';
   } else if (value > 70) {
-    colorClass = 'text-red-400';
-    bgClass = 'bg-red-500/20';
+    colorClass = 'text-white';
+    bgClass = 'bg-red-600';
   } else if (value < 40) {
-    colorClass = 'text-emerald-300/70';
-    bgClass = 'bg-emerald-500/10';
+    colorClass = 'text-emerald-300';
+    bgClass = 'bg-emerald-800/60';
   } else if (value > 60) {
-    colorClass = 'text-red-300/70';
-    bgClass = 'bg-red-500/10';
+    colorClass = 'text-red-300';
+    bgClass = 'bg-red-800/60';
   }
   
   return (
-    <span className={`px-2 py-0.5 rounded text-xs font-mono ${colorClass} ${bgClass}`}>
+    <span className={`px-2 py-0.5 rounded text-xs font-mono font-medium ${colorClass} ${bgClass}`}>
       {value.toFixed(1)}
     </span>
   );
@@ -166,17 +166,17 @@ function AnalysisModal({
 
             {/* Analysis */}
             <div className="bg-zinc-900 rounded-lg p-4 border border-zinc-800">
-              <p className="text-sm text-muted-foreground mb-2">🤖 Grok Analysis</p>
-              <p className="text-foreground leading-relaxed">{result.analysis}</p>
+              <p className="text-sm text-zinc-400 mb-2">🤖 Grok Analysis</p>
+              <p className="text-white leading-relaxed">{result.analysis}</p>
             </div>
 
             {/* Observations */}
             {result.signals.reasons.length > 0 && (
               <div className="bg-zinc-900/50 rounded-lg p-4 border border-zinc-800/50">
-                <p className="text-sm text-muted-foreground mb-2">📊 Key Observations</p>
+                <p className="text-sm text-zinc-400 mb-2">📊 Key Observations</p>
                 <ul className="space-y-1">
                   {result.signals.reasons.map((r, i) => (
-                    <li key={i} className="text-sm text-foreground/80 flex gap-2">
+                    <li key={i} className="text-sm text-white flex gap-2">
                       <span className="text-blue-400">•</span> {r}
                     </li>
                   ))}
@@ -186,21 +186,21 @@ function AnalysisModal({
 
             {/* RSI Table */}
             <div className="bg-zinc-900/30 rounded-lg p-4 border border-zinc-800/30">
-              <p className="text-sm text-muted-foreground mb-3">📈 RSI Overview</p>
+              <p className="text-sm text-zinc-400 mb-3">📈 RSI Overview</p>
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow className="border-zinc-800">
-                      <TableHead className="w-16">TF</TableHead>
+                      <TableHead className="w-16 text-white">TF</TableHead>
                       {RSI_PERIODS.map(p => (
-                        <TableHead key={p} className="text-center">RSI{p}</TableHead>
+                        <TableHead key={p} className="text-center text-white">RSI{p}</TableHead>
                       ))}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {TIMEFRAMES.map(tf => (
                       <TableRow key={tf.label} className="border-zinc-800/50">
-                        <TableCell className="font-medium">{tf.label}</TableCell>
+                        <TableCell className="font-medium text-white">{tf.label}</TableCell>
                         {RSI_PERIODS.map(period => (
                           <TableCell key={period} className="text-center">
                             <RSICell value={crypto.timeframes[tf.label]?.[period] ?? null} />
