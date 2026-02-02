@@ -361,14 +361,19 @@ export default function Home() {
   }, [loadData]);
 
   // Search
+  const [searching, setSearching] = useState(false);
+  
   useEffect(() => {
     if (searchQuery.length < 1) {
       setSearchResults([]);
+      setSearching(false);
       return;
     }
+    setSearching(true);
     const timeout = setTimeout(async () => {
       const results = await searchSymbols(searchQuery);
       setSearchResults(results);
+      setSearching(false);
     }, 300);
     return () => clearTimeout(timeout);
   }, [searchQuery]);
@@ -547,35 +552,41 @@ export default function Home() {
 
       {/* Search Dialog */}
       <Dialog open={searchOpen} onOpenChange={setSearchOpen}>
-        <DialogContent className="max-w-md bg-zinc-950 border-zinc-800 p-0">
-          <Command className="bg-transparent">
-            <CommandInput 
-              placeholder="Search coins..." 
+        <DialogContent className="max-w-md bg-zinc-900 border-zinc-700 p-0">
+          <div className="p-4">
+            <Input
+              placeholder="Search coins (e.g. PEPE, SHIB)..."
               value={searchQuery}
-              onValueChange={setSearchQuery}
-              className="border-b border-zinc-800"
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="bg-zinc-800 border-zinc-700 text-white placeholder:text-zinc-500"
+              autoFocus
             />
-            <CommandList>
-              <CommandEmpty>No results found.</CommandEmpty>
-              <CommandGroup>
-                {searchResults.map(symbol => (
-                  <CommandItem 
-                    key={symbol}
-                    onSelect={() => addFromSearch(symbol)}
-                    className="cursor-pointer"
-                  >
-                    <span className="font-mono font-semibold">{symbol.replace('USDT', '')}</span>
-                    <span className="ml-2 text-muted-foreground text-sm">
-                      ${priceMap[symbol] ? formatPrice(priceMap[symbol]) : '-'}
-                    </span>
-                    {favorites.includes(symbol) && (
-                      <Star className="ml-auto h-3 w-3 fill-yellow-500 text-yellow-500" />
-                    )}
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            </CommandList>
-          </Command>
+          </div>
+          <div className="max-h-80 overflow-auto px-2 pb-4">
+            {searching && (
+              <p className="text-zinc-400 text-center py-4">Searching...</p>
+            )}
+            {!searching && searchQuery.length > 0 && searchResults.length === 0 && (
+              <p className="text-zinc-400 text-center py-4">No coins found</p>
+            )}
+            {searchResults.map(symbol => (
+              <div
+                key={symbol}
+                onClick={() => addFromSearch(symbol)}
+                className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-zinc-800 cursor-pointer"
+              >
+                <span className="font-mono font-semibold text-white">{symbol.replace('USDT', '')}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-zinc-400 text-sm">
+                    ${priceMap[symbol] ? formatPrice(priceMap[symbol]) : '-'}
+                  </span>
+                  {favorites.includes(symbol) && (
+                    <Star className="h-3 w-3 fill-yellow-500 text-yellow-500" />
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </DialogContent>
       </Dialog>
 
