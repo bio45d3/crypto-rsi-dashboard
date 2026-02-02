@@ -129,9 +129,9 @@ function AnalysisModal({
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-auto bg-zinc-950 border-zinc-800">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-3">
-            <span className="text-2xl font-bold">{crypto.symbol}</span>
-            <span className="text-muted-foreground font-normal">{crypto.name}</span>
-            <Badge variant="outline" className="ml-auto font-mono">
+            <span className="text-2xl font-bold text-white">{crypto.symbol}</span>
+            <span className="text-zinc-400 font-normal">{crypto.name}</span>
+            <Badge variant="outline" className="ml-auto font-mono text-white border-zinc-600">
               ${formatPrice(crypto.price)}
             </Badge>
           </DialogTitle>
