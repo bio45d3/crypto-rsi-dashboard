@@ -1,11 +1,13 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { TIMEFRAMES, RSI_PERIODS, TOP_CRYPTOS, SYMBOL_NAMES, RSIData } from '@/lib/binance';
-import { calculateRSI, getRSIColor, getRSIBgColor } from '@/lib/rsi';
+import { calculateRSI } from '@/lib/rsi';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import {
   Dialog,
   DialogContent,
@@ -13,13 +15,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from '@/components/ui/command';
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -28,8 +29,32 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Star, Search, RefreshCw, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { Star, Search, RefreshCw, TrendingUp, TrendingDown, Minus, Bell, BellRing } from 'lucide-react';
 
+// Types
+interface Alert {
+  symbol: string;
+  rsiPeriod: number;
+  timeframe: string;
+  condition: 'below' | 'above';
+  threshold: number;
+  enabled: boolean;
+}
+
+interface Signal {
+  type: 'scalp_long' | 'scalp_short' | 'swing_long' | 'swing_short' | 'neutral';
+  strength: 'weak' | 'moderate' | 'strong';
+  urgency: 'low' | 'medium' | 'high';
+  reasons: string[];
+}
+
+interface AnalysisResult {
+  signals: Signal;
+  analysis: string;
+  timestamp: string;
+}
+
+// Utility functions
 function formatPrice(price: number): string {
   if (price >= 1000) return price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   if (price >= 1) return price.toFixed(2);
@@ -64,19 +89,166 @@ function RSICell({ value }: { value: number | null }) {
   );
 }
 
-interface Signal {
-  type: 'scalp_long' | 'scalp_short' | 'swing_long' | 'swing_short' | 'neutral';
-  strength: 'weak' | 'moderate' | 'strong';
-  urgency: 'low' | 'medium' | 'high';
-  reasons: string[];
+// Alert Settings Modal
+function AlertModal({
+  crypto,
+  open,
+  onClose,
+  alerts,
+  onSaveAlert,
+  onDeleteAlert
+}: {
+  crypto: RSIData | null;
+  open: boolean;
+  onClose: () => void;
+  alerts: Alert[];
+  onSaveAlert: (alert: Alert) => void;
+  onDeleteAlert: (index: number) => void;
+}) {
+  const [rsiPeriod, setRsiPeriod] = useState<number>(14);
+  const [timeframe, setTimeframe] = useState<string>('4h');
+  const [condition, setCondition] = useState<'below' | 'above'>('below');
+  const [threshold, setThreshold] = useState<number>(30);
+
+  if (!crypto) return null;
+
+  const symbolAlerts = alerts.filter(a => a.symbol === crypto.symbol + 'USDT');
+
+  const handleAdd = () => {
+    onSaveAlert({
+      symbol: crypto.symbol + 'USDT',
+      rsiPeriod,
+      timeframe,
+      condition,
+      threshold,
+      enabled: true
+    });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-lg bg-zinc-900 border-zinc-700">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-white">
+            <Bell className="h-5 w-5" />
+            Alerts for {crypto.symbol}
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {/* Add new alert */}
+          <div className="bg-zinc-800 rounded-lg p-4 space-y-3">
+            <p className="text-sm text-zinc-400">Add new alert</p>
+            
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs text-zinc-400">RSI Period</Label>
+                <Select value={String(rsiPeriod)} onValueChange={(v) => setRsiPeriod(Number(v))}>
+                  <SelectTrigger className="bg-zinc-700 border-zinc-600 text-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-zinc-800 border-zinc-700">
+                    {RSI_PERIODS.map(p => (
+                      <SelectItem key={p} value={String(p)} className="text-white">RSI{p}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div>
+                <Label className="text-xs text-zinc-400">Timeframe</Label>
+                <Select value={timeframe} onValueChange={setTimeframe}>
+                  <SelectTrigger className="bg-zinc-700 border-zinc-600 text-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-zinc-800 border-zinc-700">
+                    {TIMEFRAMES.map(tf => (
+                      <SelectItem key={tf.label} value={tf.label} className="text-white">{tf.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div>
+                <Label className="text-xs text-zinc-400">Condition</Label>
+                <Select value={condition} onValueChange={(v) => setCondition(v as 'below' | 'above')}>
+                  <SelectTrigger className="bg-zinc-700 border-zinc-600 text-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-zinc-800 border-zinc-700">
+                    <SelectItem value="below" className="text-white">Below (Oversold)</SelectItem>
+                    <SelectItem value="above" className="text-white">Above (Overbought)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div>
+                <Label className="text-xs text-zinc-400">Threshold</Label>
+                <Input 
+                  type="number" 
+                  value={threshold}
+                  onChange={(e) => setThreshold(Number(e.target.value))}
+                  className="bg-zinc-700 border-zinc-600 text-white"
+                  min={1}
+                  max={99}
+                />
+              </div>
+            </div>
+            
+            <Button onClick={handleAdd} className="w-full bg-blue-600 hover:bg-blue-700">
+              Add Alert
+            </Button>
+          </div>
+
+          {/* Existing alerts */}
+          {symbolAlerts.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-sm text-zinc-400">Active alerts</p>
+              {symbolAlerts.map((alert, idx) => {
+                const globalIdx = alerts.findIndex(a => 
+                  a.symbol === alert.symbol && 
+                  a.rsiPeriod === alert.rsiPeriod && 
+                  a.timeframe === alert.timeframe &&
+                  a.condition === alert.condition &&
+                  a.threshold === alert.threshold
+                );
+                return (
+                  <div key={idx} className="flex items-center justify-between bg-zinc-800 rounded-lg p-3">
+                    <div className="flex items-center gap-3">
+                      <Switch 
+                        checked={alert.enabled}
+                        onCheckedChange={(checked) => {
+                          onSaveAlert({ ...alert, enabled: checked });
+                        }}
+                      />
+                      <span className="text-white text-sm">
+                        RSI{alert.rsiPeriod} {alert.timeframe} {alert.condition} {alert.threshold}
+                      </span>
+                    </div>
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={() => onDeleteAlert(globalIdx)}
+                      className="text-red-400 hover:text-red-300 hover:bg-red-900/20"
+                    >
+                      ×
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {symbolAlerts.length === 0 && (
+            <p className="text-zinc-500 text-center py-4">No alerts set for {crypto.symbol}</p>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
-interface AnalysisResult {
-  signals: Signal;
-  analysis: string;
-  timestamp: string;
-}
-
+// Analysis Modal
 function AnalysisModal({ 
   crypto, 
   open,
@@ -139,8 +311,8 @@ function AnalysisModal({
 
         {loading ? (
           <div className="flex flex-col items-center justify-center py-12">
-            <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground mb-3" />
-            <p className="text-muted-foreground">Analyzing with Grok...</p>
+            <RefreshCw className="h-8 w-8 animate-spin text-zinc-500 mb-3" />
+            <p className="text-zinc-400">Analyzing with Grok...</p>
           </div>
         ) : result ? (
           <div className="space-y-4">
@@ -159,7 +331,7 @@ function AnalysisModal({
               <Badge variant={result.signals.urgency === 'high' ? 'destructive' : 'secondary'}>
                 {result.signals.urgency.toUpperCase()} URGENCY
               </Badge>
-              <Badge variant="outline">
+              <Badge variant="outline" className="text-white border-zinc-600">
                 {result.signals.strength.toUpperCase()}
               </Badge>
             </div>
@@ -214,13 +386,14 @@ function AnalysisModal({
             </div>
           </div>
         ) : (
-          <p className="text-muted-foreground text-center py-8">Failed to analyze</p>
+          <p className="text-zinc-400 text-center py-8">Failed to analyze</p>
         )}
       </DialogContent>
     </Dialog>
   );
 }
 
+// Data fetching functions
 async function fetchKlines(symbol: string, interval: string, limit: number): Promise<number[]> {
   const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
   try {
@@ -307,29 +480,97 @@ async function searchSymbols(query: string): Promise<string[]> {
   }
 }
 
+// Notification functions
+function requestNotificationPermission() {
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+}
+
+function sendNotification(title: string, body: string) {
+  if ('Notification' in window && Notification.permission === 'granted') {
+    new Notification(title, { 
+      body, 
+      icon: '/favicon.ico',
+      tag: 'rsi-alert'
+    });
+  }
+}
+
+function checkAlerts(data: RSIData[], alerts: Alert[], triggeredRef: React.MutableRefObject<Set<string>>) {
+  for (const alert of alerts) {
+    if (!alert.enabled) continue;
+    
+    const crypto = data.find(d => d.symbol + 'USDT' === alert.symbol);
+    if (!crypto) continue;
+    
+    const rsiValue = crypto.timeframes[alert.timeframe]?.[alert.rsiPeriod];
+    if (rsiValue === null || rsiValue === undefined) continue;
+    
+    const alertKey = `${alert.symbol}-${alert.rsiPeriod}-${alert.timeframe}-${alert.condition}-${alert.threshold}`;
+    const isTriggered = alert.condition === 'below' 
+      ? rsiValue < alert.threshold 
+      : rsiValue > alert.threshold;
+    
+    if (isTriggered && !triggeredRef.current.has(alertKey)) {
+      triggeredRef.current.add(alertKey);
+      const symbol = alert.symbol.replace('USDT', '');
+      const direction = alert.condition === 'below' ? '📉 OVERSOLD' : '📈 OVERBOUGHT';
+      sendNotification(
+        `${symbol} RSI Alert!`,
+        `${direction}\nRSI${alert.rsiPeriod} ${alert.timeframe}: ${rsiValue.toFixed(1)} (${alert.condition} ${alert.threshold})`
+      );
+    } else if (!isTriggered && triggeredRef.current.has(alertKey)) {
+      // Reset when condition no longer met
+      triggeredRef.current.delete(alertKey);
+    }
+  }
+}
+
+// Main Component
 export default function Home() {
   const [data, setData] = useState<RSIData[]>([]);
   const [favorites, setFavorites] = useState<string[]>([]);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string>('');
   const [selectedCrypto, setSelectedCrypto] = useState<RSIData | null>(null);
+  const [alertCrypto, setAlertCrypto] = useState<RSIData | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<string[]>([]);
+  const [searching, setSearching] = useState(false);
   const [priceMap, setPriceMap] = useState<Record<string, number>>({});
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const triggeredAlertsRef = useRef<Set<string>>(new Set());
 
-  // Load favorites
+  // Request notification permission on mount
   useEffect(() => {
-    const saved = localStorage.getItem('rsi-favorites');
-    if (saved) {
-      try { setFavorites(JSON.parse(saved)); } catch {}
+    if ('Notification' in window) {
+      setNotificationsEnabled(Notification.permission === 'granted');
     }
   }, []);
 
-  // Save favorites
+  // Load favorites & alerts from localStorage
+  useEffect(() => {
+    const savedFavorites = localStorage.getItem('rsi-favorites');
+    if (savedFavorites) {
+      try { setFavorites(JSON.parse(savedFavorites)); } catch {}
+    }
+    const savedAlerts = localStorage.getItem('rsi-alerts');
+    if (savedAlerts) {
+      try { setAlerts(JSON.parse(savedAlerts)); } catch {}
+    }
+  }, []);
+
+  // Save to localStorage
   useEffect(() => {
     localStorage.setItem('rsi-favorites', JSON.stringify(favorites));
   }, [favorites]);
+
+  useEffect(() => {
+    localStorage.setItem('rsi-alerts', JSON.stringify(alerts));
+  }, [alerts]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -337,10 +578,14 @@ export default function Home() {
       const prices = await fetchAllPrices();
       setPriceMap(prices);
       
-      // Combine favorites + top cryptos (deduped)
-      const allSymbols = [...new Set([...favorites, ...TOP_CRYPTOS])];
+      // Get symbols from favorites + alerts + top cryptos
+      const alertSymbols = [...new Set(alerts.map(a => a.symbol))];
+      const allSymbols = [...new Set([...favorites, ...alertSymbols, ...TOP_CRYPTOS])];
       const rsiData = await fetchCryptoData(allSymbols, prices);
       setData(rsiData);
+      
+      // Check alerts
+      checkAlerts(rsiData, alerts, triggeredAlertsRef);
       
       setLastUpdated(new Date().toLocaleTimeString('en-US', { 
         timeZone: 'Europe/Budapest',
@@ -352,7 +597,7 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }, [favorites]);
+  }, [favorites, alerts]);
 
   useEffect(() => {
     loadData();
@@ -361,8 +606,6 @@ export default function Home() {
   }, [loadData]);
 
   // Search
-  const [searching, setSearching] = useState(false);
-  
   useEffect(() => {
     if (searchQuery.length < 1) {
       setSearchResults([]);
@@ -394,10 +637,43 @@ export default function Home() {
     setSearchOpen(false);
     setSearchQuery('');
     
-    // Fetch data for new coin
     if (!data.find(d => d.symbol === symbol.replace('USDT', ''))) {
       const newData = await fetchCryptoData([symbol], priceMap);
       setData(prev => [...newData, ...prev]);
+    }
+  };
+
+  const handleSaveAlert = (alert: Alert) => {
+    setAlerts(prev => {
+      // Check if alert already exists
+      const existingIdx = prev.findIndex(a => 
+        a.symbol === alert.symbol && 
+        a.rsiPeriod === alert.rsiPeriod && 
+        a.timeframe === alert.timeframe &&
+        a.condition === alert.condition &&
+        a.threshold === alert.threshold
+      );
+      if (existingIdx >= 0) {
+        // Update existing
+        const updated = [...prev];
+        updated[existingIdx] = alert;
+        return updated;
+      }
+      // Add new
+      return [...prev, alert];
+    });
+  };
+
+  const handleDeleteAlert = (index: number) => {
+    setAlerts(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const enableNotifications = () => {
+    requestNotificationPermission();
+    if ('Notification' in window) {
+      Notification.requestPermission().then(permission => {
+        setNotificationsEnabled(permission === 'granted');
+      });
     }
   };
 
@@ -410,20 +686,34 @@ export default function Home() {
     return 0;
   });
 
+  const hasAlerts = (symbol: string) => alerts.some(a => a.symbol === symbol + 'USDT' && a.enabled);
+
   return (
-    <main className="min-h-screen bg-zinc-950 text-foreground">
+    <main className="min-h-screen bg-zinc-950 text-white">
       {/* Header */}
       <header className="sticky top-0 z-40 bg-zinc-950/95 backdrop-blur border-b border-zinc-800">
         <div className="max-w-[1600px] mx-auto px-4 py-3">
           <div className="flex items-center justify-between gap-4">
             <div>
               <h1 className="text-xl font-bold tracking-tight">Crypto RSI</h1>
-              <p className="text-xs text-muted-foreground">
-                Click any coin for AI analysis
+              <p className="text-xs text-zinc-400">
+                Click coin for AI • Bell for alerts
               </p>
             </div>
 
             <div className="flex items-center gap-2">
+              {!notificationsEnabled && (
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={enableNotifications}
+                  className="gap-2 border-yellow-600 text-yellow-500 hover:bg-yellow-900/20"
+                >
+                  <Bell className="h-4 w-4" />
+                  <span className="hidden sm:inline">Enable Alerts</span>
+                </Button>
+              )}
+              
               <Button 
                 variant="outline" 
                 size="sm"
@@ -448,7 +738,7 @@ export default function Home() {
           </div>
 
           {/* Legend */}
-          <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+          <div className="flex items-center gap-4 mt-2 text-xs text-zinc-400">
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-emerald-500" />
               Oversold (&lt;30)
@@ -461,6 +751,10 @@ export default function Home() {
               <Star className="h-3 w-3 fill-yellow-500 text-yellow-500" />
               Favorited
             </span>
+            <span className="flex items-center gap-1">
+              <BellRing className="h-3 w-3 text-blue-400" />
+              Has Alerts
+            </span>
           </div>
         </div>
       </header>
@@ -472,6 +766,7 @@ export default function Home() {
             <Table>
               <TableHeader>
                 <TableRow className="bg-zinc-900/50 border-zinc-800 hover:bg-zinc-900/50">
+                  <TableHead className="w-10"></TableHead>
                   <TableHead className="w-10"></TableHead>
                   <TableHead className="font-semibold text-white">Asset</TableHead>
                   <TableHead className="text-right font-semibold text-white">Price</TableHead>
@@ -486,6 +781,7 @@ export default function Home() {
                   ))}
                 </TableRow>
                 <TableRow className="bg-zinc-900/30 border-zinc-800 hover:bg-zinc-900/30">
+                  <TableHead></TableHead>
                   <TableHead></TableHead>
                   <TableHead></TableHead>
                   <TableHead></TableHead>
@@ -504,6 +800,7 @@ export default function Home() {
               <TableBody>
                 {sortedData.map((crypto) => {
                   const isFav = favorites.includes(crypto.symbol + 'USDT');
+                  const hasAlert = hasAlerts(crypto.symbol);
                   return (
                     <TableRow 
                       key={crypto.symbol}
@@ -517,7 +814,21 @@ export default function Home() {
                           className="h-8 w-8 p-0"
                           onClick={() => toggleFavorite(crypto.symbol)}
                         >
-                          <Star className={`h-4 w-4 ${isFav ? 'fill-yellow-500 text-yellow-500' : 'text-muted-foreground'}`} />
+                          <Star className={`h-4 w-4 ${isFav ? 'fill-yellow-500 text-yellow-500' : 'text-zinc-600'}`} />
+                        </Button>
+                      </TableCell>
+                      <TableCell className="w-10" onClick={(e) => e.stopPropagation()}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0"
+                          onClick={() => setAlertCrypto(crypto)}
+                        >
+                          {hasAlert ? (
+                            <BellRing className="h-4 w-4 text-blue-400" />
+                          ) : (
+                            <Bell className="h-4 w-4 text-zinc-600" />
+                          )}
                         </Button>
                       </TableCell>
                       <TableCell>
@@ -545,7 +856,7 @@ export default function Home() {
           </div>
         </div>
 
-        <p className="text-center text-xs text-muted-foreground mt-4">
+        <p className="text-center text-xs text-zinc-500 mt-4">
           Binance data • Grok AI • Auto-refresh 60s
         </p>
       </div>
@@ -595,6 +906,16 @@ export default function Home() {
         crypto={selectedCrypto}
         open={!!selectedCrypto}
         onClose={() => setSelectedCrypto(null)}
+      />
+
+      {/* Alert Modal */}
+      <AlertModal
+        crypto={alertCrypto}
+        open={!!alertCrypto}
+        onClose={() => setAlertCrypto(null)}
+        alerts={alerts}
+        onSaveAlert={handleSaveAlert}
+        onDeleteAlert={handleDeleteAlert}
       />
     </main>
   );
