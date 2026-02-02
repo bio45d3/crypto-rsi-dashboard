@@ -328,10 +328,10 @@ function AnalysisModal({
                   </Badge>
                 );
               })()}
-              <Badge variant={result.signals.urgency === 'high' ? 'destructive' : 'secondary'}>
+              <Badge className={result.signals.urgency === 'high' ? 'bg-red-600 text-white' : 'bg-zinc-700 text-white'}>
                 {result.signals.urgency.toUpperCase()} URGENCY
               </Badge>
-              <Badge variant="outline" className="text-white border-zinc-600">
+              <Badge className="bg-zinc-700 text-white border border-zinc-600">
                 {result.signals.strength.toUpperCase()}
               </Badge>
             </div>
@@ -707,7 +707,7 @@ export default function Home() {
                   variant="outline" 
                   size="sm"
                   onClick={enableNotifications}
-                  className="gap-2 border-yellow-600 text-yellow-500 hover:bg-yellow-900/20"
+                  className="gap-2 border-yellow-600 text-yellow-400 hover:bg-yellow-900/20 hover:text-yellow-300"
                 >
                   <Bell className="h-4 w-4" />
                   <span className="hidden sm:inline">Enable Alerts</span>
@@ -718,7 +718,7 @@ export default function Home() {
                 variant="outline" 
                 size="sm"
                 onClick={() => setSearchOpen(true)}
-                className="gap-2"
+                className="gap-2 border-zinc-600 text-white hover:bg-zinc-800"
               >
                 <Search className="h-4 w-4" />
                 <span className="hidden sm:inline">Search</span>
@@ -729,7 +729,7 @@ export default function Home() {
                 size="sm"
                 onClick={loadData}
                 disabled={loading}
-                className="gap-2"
+                className="gap-2 text-white hover:bg-zinc-800"
               >
                 <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
                 <span className="hidden sm:inline">{lastUpdated || 'Refresh'}</span>
