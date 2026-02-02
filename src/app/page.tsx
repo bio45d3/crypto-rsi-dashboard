@@ -494,6 +494,22 @@ interface NotificationLog {
   type: 'oversold' | 'overbought';
 }
 
+// Alert performance tracking
+interface AlertPerformance {
+  id: string;
+  symbol: string;
+  triggerTime: number;
+  triggerPrice: number;
+  triggerRSI: number;
+  rsiPeriod: number;
+  timeframe: string;
+  type: 'oversold' | 'overbought';
+  currentPrice?: number;
+  priceChange?: number;
+  outcome?: 'win' | 'loss' | 'pending';
+  checkedAt?: number;
+}
+
 // Notification functions
 function requestNotificationPermission() {
   if ('Notification' in window && Notification.permission === 'default') {
@@ -515,7 +531,8 @@ function checkAlerts(
   data: RSIData[], 
   alerts: Alert[], 
   triggeredRef: React.MutableRefObject<Set<string>>,
-  addLog: (log: NotificationLog) => void
+  addLog: (log: NotificationLog) => void,
+  addPerformance: (perf: AlertPerformance) => void
 ) {
   for (const alert of alerts) {
     if (!alert.enabled) continue;
@@ -547,6 +564,19 @@ function checkAlerts(
         timestamp: new Date(),
         type: alert.condition === 'below' ? 'oversold' : 'overbought'
       });
+      
+      // Add to performance tracking
+      addPerformance({
+        id: `${Date.now()}-${alertKey}`,
+        symbol,
+        triggerTime: Date.now(),
+        triggerPrice: crypto.price,
+        triggerRSI: rsiValue,
+        rsiPeriod: alert.rsiPeriod,
+        timeframe: alert.timeframe,
+        type: alert.condition === 'below' ? 'oversold' : 'overbought',
+        outcome: 'pending'
+      });
     } else if (!isTriggered && triggeredRef.current.has(alertKey)) {
       // Reset when condition no longer met
       triggeredRef.current.delete(alertKey);
@@ -574,6 +604,7 @@ export default function Home() {
   const [visibleTF, setVisibleTF] = useState<string[]>(TIMEFRAMES.map(t => t.label));
   const [scannerResults, setScannerResults] = useState<ScannerResult[]>([]);
   const [scanning, setScanning] = useState(false);
+  const [alertPerformance, setAlertPerformance] = useState<AlertPerformance[]>([]);
   const triggeredAlertsRef = useRef<Set<string>>(new Set());
 
   const addNotificationLog = useCallback((log: NotificationLog) => {
@@ -597,6 +628,10 @@ export default function Home() {
     if (savedAlerts) {
       try { setAlerts(JSON.parse(savedAlerts)); } catch {}
     }
+    const savedPerformance = localStorage.getItem('rsi-alert-performance');
+    if (savedPerformance) {
+      try { setAlertPerformance(JSON.parse(savedPerformance)); } catch {}
+    }
   }, []);
 
   // Save to localStorage
@@ -607,6 +642,10 @@ export default function Home() {
   useEffect(() => {
     localStorage.setItem('rsi-alerts', JSON.stringify(alerts));
   }, [alerts]);
+
+  useEffect(() => {
+    localStorage.setItem('rsi-alert-performance', JSON.stringify(alertPerformance));
+  }, [alertPerformance]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -621,7 +660,42 @@ export default function Home() {
       setData(rsiData);
       
       // Check alerts
-      checkAlerts(rsiData, alerts, triggeredAlertsRef, addNotificationLog);
+      checkAlerts(rsiData, alerts, triggeredAlertsRef, addNotificationLog, (perf) => {
+        setAlertPerformance(prev => [perf, ...prev].slice(0, 100));
+      });
+      
+      // Update performance tracking
+      setAlertPerformance(prev => prev.map(perf => {
+        if (perf.outcome !== 'pending') return perf;
+        
+        const crypto = rsiData.find(d => d.symbol === perf.symbol);
+        if (!crypto) return perf;
+        
+        const currentPrice = crypto.price;
+        const priceChange = ((currentPrice - perf.triggerPrice) / perf.triggerPrice) * 100;
+        const timePassed = Date.now() - perf.triggerTime;
+        const hoursPassed = timePassed / (1000 * 60 * 60);
+        
+        // Determine outcome after 1 hour
+        let outcome: AlertPerformance['outcome'] = 'pending';
+        if (hoursPassed >= 1) {
+          if (perf.type === 'oversold') {
+            // For oversold, we expect price to go UP
+            outcome = priceChange > 0 ? 'win' : 'loss';
+          } else {
+            // For overbought, we expect price to go DOWN
+            outcome = priceChange < 0 ? 'win' : 'loss';
+          }
+        }
+        
+        return {
+          ...perf,
+          currentPrice,
+          priceChange,
+          outcome,
+          checkedAt: Date.now()
+        };
+      }));
       
       setLastUpdated(new Date().toLocaleTimeString('en-US', { 
         timeZone: 'Europe/Budapest',
@@ -1160,6 +1234,108 @@ export default function Home() {
             </div>
           )}
         </div>
+
+        {/* Alert Performance Tracking */}
+        {alertPerformance.length > 0 && (
+          <div className="mt-6 border border-zinc-800 rounded-lg overflow-hidden">
+            <div className="bg-zinc-900 px-4 py-3 flex items-center justify-between border-b border-zinc-800">
+              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                📊 Alert Performance
+                {(() => {
+                  const completed = alertPerformance.filter(p => p.outcome !== 'pending');
+                  const wins = completed.filter(p => p.outcome === 'win').length;
+                  const total = completed.length;
+                  const winRate = total > 0 ? ((wins / total) * 100).toFixed(0) : 0;
+                  return total > 0 ? (
+                    <span className={`ml-2 px-2 py-0.5 rounded text-xs ${
+                      Number(winRate) >= 50 ? 'bg-emerald-600' : 'bg-red-600'
+                    } text-white`}>
+                      {winRate}% Win Rate ({wins}/{total})
+                    </span>
+                  ) : null;
+                })()}
+              </h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setAlertPerformance([])}
+                className="text-zinc-400 hover:text-white text-xs"
+              >
+                Clear History
+              </Button>
+            </div>
+            <div className="max-h-48 overflow-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-zinc-900/50 border-zinc-800">
+                    <TableHead className="text-white">Coin</TableHead>
+                    <TableHead className="text-white">Signal</TableHead>
+                    <TableHead className="text-white text-right">Entry</TableHead>
+                    <TableHead className="text-white text-right">Current</TableHead>
+                    <TableHead className="text-white text-right">Change</TableHead>
+                    <TableHead className="text-white text-center">Result</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {alertPerformance.slice(0, 20).map((perf) => (
+                    <TableRow key={perf.id} className="border-zinc-800/50">
+                      <TableCell>
+                        <div className="font-semibold text-white">{perf.symbol}</div>
+                        <div className="text-xs text-zinc-400">
+                          {new Date(perf.triggerTime).toLocaleTimeString()}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <span className={`text-xs px-1.5 py-0.5 rounded ${
+                          perf.type === 'oversold' 
+                            ? 'bg-emerald-800 text-emerald-200' 
+                            : 'bg-red-800 text-red-200'
+                        }`}>
+                          {perf.type === 'oversold' ? '📈 LONG' : '📉 SHORT'}
+                        </span>
+                        <div className="text-xs text-zinc-500 mt-0.5">
+                          RSI{perf.rsiPeriod} {perf.timeframe}: {perf.triggerRSI.toFixed(1)}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-sm text-white">
+                        ${formatPrice(perf.triggerPrice)}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-sm text-white">
+                        {perf.currentPrice ? `$${formatPrice(perf.currentPrice)}` : '-'}
+                      </TableCell>
+                      <TableCell className={`text-right font-mono text-sm ${
+                        (perf.priceChange ?? 0) > 0 ? 'text-emerald-400' : 
+                        (perf.priceChange ?? 0) < 0 ? 'text-red-400' : 'text-zinc-400'
+                      }`}>
+                        {perf.priceChange !== undefined 
+                          ? `${perf.priceChange > 0 ? '+' : ''}${perf.priceChange.toFixed(2)}%`
+                          : '-'
+                        }
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {perf.outcome === 'win' && (
+                          <span className="px-2 py-1 rounded bg-emerald-600 text-white text-xs font-bold">
+                            ✓ WIN
+                          </span>
+                        )}
+                        {perf.outcome === 'loss' && (
+                          <span className="px-2 py-1 rounded bg-red-600 text-white text-xs font-bold">
+                            ✗ LOSS
+                          </span>
+                        )}
+                        {perf.outcome === 'pending' && (
+                          <span className="px-2 py-1 rounded bg-zinc-700 text-zinc-300 text-xs">
+                            ⏳ 1h wait
+                          </span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        )}
 
         {/* Notification Log */}
         {notificationLogs.length > 0 && (
