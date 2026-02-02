@@ -480,6 +480,15 @@ async function searchSymbols(query: string): Promise<string[]> {
   }
 }
 
+// Notification log entry
+interface NotificationLog {
+  id: string;
+  symbol: string;
+  message: string;
+  timestamp: Date;
+  type: 'oversold' | 'overbought';
+}
+
 // Notification functions
 function requestNotificationPermission() {
   if ('Notification' in window && Notification.permission === 'default') {
@@ -497,7 +506,12 @@ function sendNotification(title: string, body: string) {
   }
 }
 
-function checkAlerts(data: RSIData[], alerts: Alert[], triggeredRef: React.MutableRefObject<Set<string>>) {
+function checkAlerts(
+  data: RSIData[], 
+  alerts: Alert[], 
+  triggeredRef: React.MutableRefObject<Set<string>>,
+  addLog: (log: NotificationLog) => void
+) {
   for (const alert of alerts) {
     if (!alert.enabled) continue;
     
@@ -516,10 +530,18 @@ function checkAlerts(data: RSIData[], alerts: Alert[], triggeredRef: React.Mutab
       triggeredRef.current.add(alertKey);
       const symbol = alert.symbol.replace('USDT', '');
       const direction = alert.condition === 'below' ? '📉 OVERSOLD' : '📈 OVERBOUGHT';
-      sendNotification(
-        `${symbol} RSI Alert!`,
-        `${direction}\nRSI${alert.rsiPeriod} ${alert.timeframe}: ${rsiValue.toFixed(1)} (${alert.condition} ${alert.threshold})`
-      );
+      const message = `RSI${alert.rsiPeriod} ${alert.timeframe}: ${rsiValue.toFixed(1)} (${alert.condition} ${alert.threshold})`;
+      
+      sendNotification(`${symbol} RSI Alert!`, `${direction}\n${message}`);
+      
+      // Add to log
+      addLog({
+        id: `${Date.now()}-${alertKey}`,
+        symbol,
+        message: `${direction} - ${message}`,
+        timestamp: new Date(),
+        type: alert.condition === 'below' ? 'oversold' : 'overbought'
+      });
     } else if (!isTriggered && triggeredRef.current.has(alertKey)) {
       // Reset when condition no longer met
       triggeredRef.current.delete(alertKey);
@@ -542,7 +564,12 @@ export default function Home() {
   const [searching, setSearching] = useState(false);
   const [priceMap, setPriceMap] = useState<Record<string, number>>({});
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [notificationLogs, setNotificationLogs] = useState<NotificationLog[]>([]);
   const triggeredAlertsRef = useRef<Set<string>>(new Set());
+
+  const addNotificationLog = useCallback((log: NotificationLog) => {
+    setNotificationLogs(prev => [log, ...prev].slice(0, 50)); // Keep last 50
+  }, []);
 
   // Request notification permission on mount
   useEffect(() => {
@@ -585,7 +612,7 @@ export default function Home() {
       setData(rsiData);
       
       // Check alerts
-      checkAlerts(rsiData, alerts, triggeredAlertsRef);
+      checkAlerts(rsiData, alerts, triggeredAlertsRef, addNotificationLog);
       
       setLastUpdated(new Date().toLocaleTimeString('en-US', { 
         timeZone: 'Europe/Budapest',
@@ -597,7 +624,7 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }, [favorites, alerts]);
+  }, [favorites, alerts, addNotificationLog]);
 
   useEffect(() => {
     loadData();
@@ -859,6 +886,52 @@ export default function Home() {
         <p className="text-center text-xs text-zinc-500 mt-4">
           Binance data • Grok AI • Auto-refresh 60s
         </p>
+
+        {/* Notification Log */}
+        {notificationLogs.length > 0 && (
+          <div className="mt-6 border border-zinc-800 rounded-lg overflow-hidden">
+            <div className="bg-zinc-900 px-4 py-2 flex items-center justify-between border-b border-zinc-800">
+              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                <BellRing className="h-4 w-4 text-blue-400" />
+                Alert Log
+              </h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setNotificationLogs([])}
+                className="text-zinc-400 hover:text-white text-xs"
+              >
+                Clear
+              </Button>
+            </div>
+            <div className="max-h-48 overflow-auto">
+              {notificationLogs.map((log) => (
+                <div 
+                  key={log.id}
+                  className={`px-4 py-2 border-b border-zinc-800/50 flex items-center justify-between ${
+                    log.type === 'oversold' ? 'bg-emerald-900/10' : 'bg-red-900/10'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className={`text-sm font-bold ${
+                      log.type === 'oversold' ? 'text-emerald-400' : 'text-red-400'
+                    }`}>
+                      {log.symbol}
+                    </span>
+                    <span className="text-sm text-zinc-300">{log.message}</span>
+                  </div>
+                  <span className="text-xs text-zinc-500">
+                    {log.timestamp.toLocaleTimeString('en-US', { 
+                      hour: '2-digit', 
+                      minute: '2-digit',
+                      second: '2-digit'
+                    })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Search Dialog */}
