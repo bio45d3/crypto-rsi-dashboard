@@ -1,8 +1,34 @@
 'use client';
 
-import { useState, useEffect, useCallback, DragEvent } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { TIMEFRAMES, RSI_PERIODS, TOP_CRYPTOS, SYMBOL_NAMES, RSIData } from '@/lib/binance';
 import { calculateRSI, getRSIColor, getRSIBgColor } from '@/lib/rsi';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Star, Search, RefreshCw, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 
 function formatPrice(price: number): string {
   if (price >= 1000) return price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -12,13 +38,29 @@ function formatPrice(price: number): string {
 }
 
 function RSICell({ value }: { value: number | null }) {
-  const colorClass = getRSIColor(value);
-  const bgClass = getRSIBgColor(value);
+  if (value === null) return <span className="text-muted-foreground">-</span>;
+  
+  let colorClass = 'text-muted-foreground';
+  let bgClass = 'bg-muted/30';
+  
+  if (value < 30) {
+    colorClass = 'text-emerald-400';
+    bgClass = 'bg-emerald-500/20';
+  } else if (value > 70) {
+    colorClass = 'text-red-400';
+    bgClass = 'bg-red-500/20';
+  } else if (value < 40) {
+    colorClass = 'text-emerald-300/70';
+    bgClass = 'bg-emerald-500/10';
+  } else if (value > 60) {
+    colorClass = 'text-red-300/70';
+    bgClass = 'bg-red-500/10';
+  }
   
   return (
-    <div className={`px-2 py-1 rounded text-center font-mono text-sm ${colorClass} ${bgClass}`}>
-      {value !== null ? value.toFixed(1) : '-'}
-    </div>
+    <span className={`px-2 py-0.5 rounded text-xs font-mono ${colorClass} ${bgClass}`}>
+      {value.toFixed(1)}
+    </span>
   );
 }
 
@@ -35,54 +77,34 @@ interface AnalysisResult {
   timestamp: string;
 }
 
-function SignalBadge({ signal }: { signal: Signal }) {
-  const config = {
-    scalp_long: { emoji: '🟢', label: 'SCALP LONG', color: 'bg-green-600' },
-    scalp_short: { emoji: '🔴', label: 'SCALP SHORT', color: 'bg-red-600' },
-    swing_long: { emoji: '📈', label: 'SWING LONG', color: 'bg-emerald-700' },
-    swing_short: { emoji: '📉', label: 'SWING SHORT', color: 'bg-rose-700' },
-    neutral: { emoji: '⚪', label: 'NEUTRAL', color: 'bg-gray-600' }
-  };
-  
-  const { emoji, label, color } = config[signal.type];
-  
-  return (
-    <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full ${color} text-white font-bold`}>
-      <span>{emoji}</span>
-      <span>{label}</span>
-    </div>
-  );
-}
-
 function AnalysisModal({ 
   crypto, 
+  open,
   onClose 
 }: { 
-  crypto: RSIData; 
+  crypto: RSIData | null;
+  open: boolean;
   onClose: () => void;
 }) {
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!crypto || !open) return;
+    
     async function analyze() {
+      setLoading(true);
+      setResult(null);
       try {
-        setLoading(true);
-        setError(null);
-        
         const res = await fetch('/api/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ cryptoData: crypto })
         });
-        
-        if (!res.ok) throw new Error('Analysis failed');
-        
-        const data = await res.json();
-        setResult(data);
+        if (res.ok) {
+          setResult(await res.json());
+        }
       } catch (e) {
-        setError('Failed to analyze. Try again.');
         console.error(e);
       } finally {
         setLoading(false);
@@ -90,141 +112,124 @@ function AnalysisModal({
     }
     
     analyze();
-  }, [crypto]);
+  }, [crypto, open]);
 
-  const urgencyColors = {
-    high: 'text-red-400 bg-red-500/20',
-    medium: 'text-yellow-400 bg-yellow-500/20',
-    low: 'text-gray-400 bg-gray-500/20'
-  };
+  if (!crypto) return null;
 
-  const strengthColors = {
-    strong: 'text-green-400',
-    moderate: 'text-yellow-400',
-    weak: 'text-gray-400'
+  const signalConfig = {
+    scalp_long: { icon: TrendingUp, label: 'SCALP LONG', color: 'bg-emerald-600' },
+    scalp_short: { icon: TrendingDown, label: 'SCALP SHORT', color: 'bg-red-600' },
+    swing_long: { icon: TrendingUp, label: 'SWING LONG', color: 'bg-emerald-700' },
+    swing_short: { icon: TrendingDown, label: 'SWING SHORT', color: 'bg-red-700' },
+    neutral: { icon: Minus, label: 'NEUTRAL', color: 'bg-zinc-600' }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div 
-        className="bg-gray-900 rounded-xl max-w-2xl w-full max-h-[80vh] overflow-auto border border-gray-700 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="p-4 border-b border-gray-700 flex justify-between items-center">
-          <div>
-            <h2 className="text-2xl font-bold">{crypto.symbol}</h2>
-            <p className="text-gray-400">{crypto.name} • ${formatPrice(crypto.price)}</p>
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-auto bg-zinc-950 border-zinc-800">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-3">
+            <span className="text-2xl font-bold">{crypto.symbol}</span>
+            <span className="text-muted-foreground font-normal">{crypto.name}</span>
+            <Badge variant="outline" className="ml-auto font-mono">
+              ${formatPrice(crypto.price)}
+            </Badge>
+          </DialogTitle>
+        </DialogHeader>
+
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-12">
+            <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground mb-3" />
+            <p className="text-muted-foreground">Analyzing with Grok...</p>
           </div>
-          <button 
-            onClick={onClose}
-            className="text-gray-400 hover:text-white text-2xl leading-none px-2"
-          >
-            ×
-          </button>
-        </div>
-
-        {/* Content */}
-        <div className="p-4">
-          {loading ? (
-            <div className="text-center py-8">
-              <div className="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full mx-auto mb-3"></div>
-              <p className="text-gray-400">Analyzing with Grok...</p>
+        ) : result ? (
+          <div className="space-y-4">
+            {/* Signal */}
+            <div className="flex items-center gap-3 flex-wrap">
+              {(() => {
+                const config = signalConfig[result.signals.type];
+                const Icon = config.icon;
+                return (
+                  <Badge className={`${config.color} text-white px-3 py-1`}>
+                    <Icon className="h-4 w-4 mr-1" />
+                    {config.label}
+                  </Badge>
+                );
+              })()}
+              <Badge variant={result.signals.urgency === 'high' ? 'destructive' : 'secondary'}>
+                {result.signals.urgency.toUpperCase()} URGENCY
+              </Badge>
+              <Badge variant="outline">
+                {result.signals.strength.toUpperCase()}
+              </Badge>
             </div>
-          ) : error ? (
-            <div className="text-center py-8 text-red-400">{error}</div>
-          ) : result ? (
-            <div className="space-y-4">
-              {/* Signal Badge */}
-              <div className="flex items-center justify-between flex-wrap gap-3">
-                <SignalBadge signal={result.signals} />
-                <div className="flex gap-2">
-                  <span className={`px-2 py-1 rounded text-xs font-medium ${urgencyColors[result.signals.urgency]}`}>
-                    ⚡ {result.signals.urgency.toUpperCase()} URGENCY
-                  </span>
-                  <span className={`px-2 py-1 rounded text-xs font-medium ${strengthColors[result.signals.strength]}`}>
-                    {result.signals.strength.toUpperCase()} SIGNAL
-                  </span>
-                </div>
+
+            {/* Analysis */}
+            <div className="bg-zinc-900 rounded-lg p-4 border border-zinc-800">
+              <p className="text-sm text-muted-foreground mb-2">🤖 Grok Analysis</p>
+              <p className="text-foreground leading-relaxed">{result.analysis}</p>
+            </div>
+
+            {/* Observations */}
+            {result.signals.reasons.length > 0 && (
+              <div className="bg-zinc-900/50 rounded-lg p-4 border border-zinc-800/50">
+                <p className="text-sm text-muted-foreground mb-2">📊 Key Observations</p>
+                <ul className="space-y-1">
+                  {result.signals.reasons.map((r, i) => (
+                    <li key={i} className="text-sm text-foreground/80 flex gap-2">
+                      <span className="text-blue-400">•</span> {r}
+                    </li>
+                  ))}
+                </ul>
               </div>
+            )}
 
-              {/* Grok Analysis */}
-              <div className="bg-gray-800 rounded-lg p-4">
-                <h3 className="text-sm font-semibold text-gray-400 mb-2 flex items-center gap-2">
-                  <span>🤖</span> Grok Analysis
-                </h3>
-                <p className="text-white leading-relaxed">{result.analysis}</p>
-              </div>
-
-              {/* Key Observations */}
-              {result.signals.reasons.length > 0 && (
-                <div className="bg-gray-800/50 rounded-lg p-4">
-                  <h3 className="text-sm font-semibold text-gray-400 mb-2">📊 Key Observations</h3>
-                  <ul className="space-y-1">
-                    {result.signals.reasons.map((reason, i) => (
-                      <li key={i} className="text-sm text-gray-300 flex items-start gap-2">
-                        <span className="text-blue-400">•</span>
-                        {reason}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* RSI Grid */}
-              <div className="bg-gray-800/50 rounded-lg p-4">
-                <h3 className="text-sm font-semibold text-gray-400 mb-3">📈 RSI Overview</h3>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-gray-500">
-                        <th className="text-left py-1 px-2">TF</th>
-                        {RSI_PERIODS.map(p => (
-                          <th key={p} className="text-center py-1 px-2">RSI{p}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {TIMEFRAMES.map(tf => (
-                        <tr key={tf.label} className="border-t border-gray-700/50">
-                          <td className="py-1 px-2 font-medium">{tf.label}</td>
-                          {RSI_PERIODS.map(period => (
-                            <td key={period} className="py-1 px-1">
-                              <RSICell value={crypto.timeframes[tf.label]?.[period] ?? null} />
-                            </td>
-                          ))}
-                        </tr>
+            {/* RSI Table */}
+            <div className="bg-zinc-900/30 rounded-lg p-4 border border-zinc-800/30">
+              <p className="text-sm text-muted-foreground mb-3">📈 RSI Overview</p>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-zinc-800">
+                      <TableHead className="w-16">TF</TableHead>
+                      {RSI_PERIODS.map(p => (
+                        <TableHead key={p} className="text-center">RSI{p}</TableHead>
                       ))}
-                    </tbody>
-                  </table>
-                </div>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {TIMEFRAMES.map(tf => (
+                      <TableRow key={tf.label} className="border-zinc-800/50">
+                        <TableCell className="font-medium">{tf.label}</TableCell>
+                        {RSI_PERIODS.map(period => (
+                          <TableCell key={period} className="text-center">
+                            <RSICell value={crypto.timeframes[tf.label]?.[period] ?? null} />
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </div>
-
-              {/* Timestamp */}
-              <p className="text-xs text-gray-500 text-right">
-                Analyzed at {new Date(result.timestamp).toLocaleTimeString()}
-              </p>
             </div>
-          ) : null}
-        </div>
-      </div>
-    </div>
+          </div>
+        ) : (
+          <p className="text-muted-foreground text-center py-8">Failed to analyze</p>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
 async function fetchKlines(symbol: string, interval: string, limit: number): Promise<number[]> {
   const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
-  
   try {
     const res = await fetch(url);
     if (!res.ok) return [];
-    
     const data = await res.json();
     if (!Array.isArray(data)) return [];
-    
     return data.map((k: (string | number)[]) => parseFloat(String(k[4])));
-  } catch (error) {
-    console.error(`Error fetching ${symbol} ${interval}:`, error);
+  } catch {
     return [];
   }
 }
@@ -251,20 +256,16 @@ async function fetchCryptoData(symbols: string[], priceMap: Record<string, numbe
     const timeframePromises = TIMEFRAMES.map(async (tf) => {
       const closes = await fetchKlines(symbol, tf.interval, tf.limit);
       const rsis: { [period: number]: number | null } = {};
-      
       for (const period of RSI_PERIODS) {
         rsis[period] = closes.length > 0 ? calculateRSI(closes, period) : null;
       }
-      
       return { label: tf.label, rsis };
     });
 
     const timeframeResults = await Promise.all(timeframePromises);
-    
-    for (const result of timeframeResults) {
-      rsiData.timeframes[result.label] = result.rsis;
+    for (const r of timeframeResults) {
+      rsiData.timeframes[r.label] = r.rsis;
     }
-
     results.push(rsiData);
   }
 
@@ -273,17 +274,16 @@ async function fetchCryptoData(symbols: string[], priceMap: Record<string, numbe
 
 async function fetchAllPrices(): Promise<Record<string, number>> {
   try {
-    const pricesRes = await fetch('https://api.binance.com/api/v3/ticker/price');
-    const pricesData = await pricesRes.json();
+    const res = await fetch('https://api.binance.com/api/v3/ticker/price');
+    const data = await res.json();
     const priceMap: Record<string, number> = {};
-    if (Array.isArray(pricesData)) {
-      for (const p of pricesData) {
+    if (Array.isArray(data)) {
+      for (const p of data) {
         priceMap[p.symbol] = parseFloat(p.price);
       }
     }
     return priceMap;
-  } catch (error) {
-    console.error('Error fetching prices:', error);
+  } catch {
     return {};
   }
 }
@@ -301,173 +301,58 @@ async function searchSymbols(query: string): Promise<string[]> {
     const upperQuery = query.toUpperCase();
     return usdtPairs
       .filter((s: string) => s.replace('USDT', '').includes(upperQuery))
-      .slice(0, 10);
-  } catch (error) {
-    console.error('Error searching symbols:', error);
+      .slice(0, 20);
+  } catch {
     return [];
   }
 }
 
-function CryptoTable({ 
-  data, 
-  loading, 
-  title,
-  onDragStart,
-  onRemove,
-  onCoinClick,
-  showRemove = false
-}: { 
-  data: RSIData[], 
-  loading: boolean, 
-  title: string,
-  onDragStart?: (symbol: string) => void,
-  onRemove?: (symbol: string) => void,
-  onCoinClick?: (crypto: RSIData) => void,
-  showRemove?: boolean
-}) {
-  return (
-    <div className="overflow-x-auto">
-      <h2 className="text-xl font-bold mb-3 text-gray-300">{title}</h2>
-      <table className="w-full border-collapse text-sm">
-        <thead>
-          <tr className="border-b border-gray-800">
-            <th className="text-left py-2 px-2 font-semibold sticky left-0 bg-gray-950 z-10">Asset</th>
-            <th className="text-right py-2 px-2 font-semibold">Price</th>
-            {TIMEFRAMES.map(tf => (
-              <th key={tf.label} colSpan={RSI_PERIODS.length} className="text-center py-2 px-1 font-semibold border-l border-gray-800">
-                {tf.label}
-              </th>
-            ))}
-            {showRemove && <th className="w-8"></th>}
-          </tr>
-          <tr className="border-b border-gray-800 text-gray-500 text-xs">
-            <th className="sticky left-0 bg-gray-950 z-10"></th>
-            <th></th>
-            {TIMEFRAMES.map(tf => (
-              RSI_PERIODS.map(period => (
-                <th key={`${tf.label}-${period}`} className="py-1 px-1 font-normal">
-                  {period}
-                </th>
-              ))
-            ))}
-            {showRemove && <th></th>}
-          </tr>
-        </thead>
-        <tbody>
-          {data.length === 0 && !loading ? (
-            <tr>
-              <td colSpan={2 + TIMEFRAMES.length * RSI_PERIODS.length + (showRemove ? 1 : 0)} className="text-center py-4 text-gray-500">
-                {showRemove ? 'Drag coins here to watch' : 'No data'}
-              </td>
-            </tr>
-          ) : (
-            data.map((crypto, idx) => (
-              <tr 
-                key={crypto.symbol} 
-                className={`border-b border-gray-800/50 hover:bg-gray-800/50 transition-colors ${idx % 2 === 0 ? 'bg-gray-900/20' : ''} cursor-pointer`}
-                draggable={!!onDragStart}
-                onDragStart={(e) => {
-                  if (onDragStart) {
-                    e.dataTransfer.setData('text/plain', crypto.symbol + 'USDT');
-                    onDragStart(crypto.symbol + 'USDT');
-                  }
-                }}
-                onClick={() => onCoinClick?.(crypto)}
-              >
-                <td className="py-2 px-2 sticky left-0 bg-gray-950 z-10">
-                  <div className="font-bold flex items-center gap-2">
-                    {crypto.symbol}
-                    <span className="text-blue-400 text-xs">🔍</span>
-                  </div>
-                  <div className="text-gray-500 text-xs">{crypto.name}</div>
-                </td>
-                <td className="py-2 px-2 text-right font-mono text-xs">
-                  ${formatPrice(crypto.price)}
-                </td>
-                {TIMEFRAMES.map(tf => (
-                  RSI_PERIODS.map(period => (
-                    <td key={`${crypto.symbol}-${tf.label}-${period}`} className="py-1 px-0.5">
-                      <RSICell value={crypto.timeframes[tf.label]?.[period] ?? null} />
-                    </td>
-                  ))
-                ))}
-                {showRemove && onRemove && (
-                  <td className="py-2 px-1" onClick={(e) => e.stopPropagation()}>
-                    <button 
-                      onClick={() => onRemove(crypto.symbol + 'USDT')}
-                      className="text-gray-500 hover:text-red-400 text-lg leading-none"
-                    >
-                      ×
-                    </button>
-                  </td>
-                )}
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 export default function Home() {
-  const [majorData, setMajorData] = useState<RSIData[]>([]);
-  const [watchlistData, setWatchlistData] = useState<RSIData[]>([]);
-  const [watchlistSymbols, setWatchlistSymbols] = useState<string[]>([]);
+  const [data, setData] = useState<RSIData[]>([]);
+  const [favorites, setFavorites] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<string>('');
-  const [error, setError] = useState<string | null>(null);
+  const [selectedCrypto, setSelectedCrypto] = useState<RSIData | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<string[]>([]);
-  const [searching, setSearching] = useState(false);
   const [priceMap, setPriceMap] = useState<Record<string, number>>({});
-  const [dragOver, setDragOver] = useState(false);
-  const [selectedCrypto, setSelectedCrypto] = useState<RSIData | null>(null);
 
-  // Load watchlist from localStorage
+  // Load favorites
   useEffect(() => {
-    const saved = localStorage.getItem('rsi-watchlist');
+    const saved = localStorage.getItem('rsi-favorites');
     if (saved) {
-      try {
-        setWatchlistSymbols(JSON.parse(saved));
-      } catch {}
+      try { setFavorites(JSON.parse(saved)); } catch {}
     }
   }, []);
 
-  // Save watchlist to localStorage
+  // Save favorites
   useEffect(() => {
-    localStorage.setItem('rsi-watchlist', JSON.stringify(watchlistSymbols));
-  }, [watchlistSymbols]);
+    localStorage.setItem('rsi-favorites', JSON.stringify(favorites));
+  }, [favorites]);
 
   const loadData = useCallback(async () => {
+    setLoading(true);
     try {
-      setLoading(true);
-      setError(null);
-      
       const prices = await fetchAllPrices();
       setPriceMap(prices);
       
-      const majorRsiData = await fetchCryptoData(TOP_CRYPTOS, prices);
-      setMajorData(majorRsiData);
+      // Combine favorites + top cryptos (deduped)
+      const allSymbols = [...new Set([...favorites, ...TOP_CRYPTOS])];
+      const rsiData = await fetchCryptoData(allSymbols, prices);
+      setData(rsiData);
       
-      if (watchlistSymbols.length > 0) {
-        const watchRsiData = await fetchCryptoData(watchlistSymbols, prices);
-        setWatchlistData(watchRsiData);
-      }
-      
-      setLastUpdated(new Date().toLocaleString('en-US', { 
+      setLastUpdated(new Date().toLocaleTimeString('en-US', { 
         timeZone: 'Europe/Budapest',
         hour: '2-digit', 
-        minute: '2-digit',
-        second: '2-digit'
+        minute: '2-digit'
       }));
-    } catch (err) {
-      setError('Failed to load data. Please refresh.');
-      console.error(err);
+    } catch (e) {
+      console.error(e);
     } finally {
       setLoading(false);
     }
-  }, [watchlistSymbols]);
+  }, [favorites]);
 
   useEffect(() => {
     loadData();
@@ -475,168 +360,231 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [loadData]);
 
-  // Search handler
+  // Search
   useEffect(() => {
     if (searchQuery.length < 1) {
       setSearchResults([]);
       return;
     }
-    
     const timeout = setTimeout(async () => {
-      setSearching(true);
       const results = await searchSymbols(searchQuery);
-      setSearchResults(results.filter(s => !watchlistSymbols.includes(s) && !TOP_CRYPTOS.includes(s)));
-      setSearching(false);
+      setSearchResults(results);
     }, 300);
-    
     return () => clearTimeout(timeout);
-  }, [searchQuery, watchlistSymbols]);
+  }, [searchQuery]);
 
-  const addToWatchlist = async (symbol: string) => {
-    if (watchlistSymbols.includes(symbol) || TOP_CRYPTOS.includes(symbol)) return;
-    
-    setWatchlistSymbols(prev => [...prev, symbol]);
+  const toggleFavorite = (symbol: string) => {
+    const fullSymbol = symbol.includes('USDT') ? symbol : symbol + 'USDT';
+    setFavorites(prev => 
+      prev.includes(fullSymbol) 
+        ? prev.filter(s => s !== fullSymbol)
+        : [...prev, fullSymbol]
+    );
+  };
+
+  const addFromSearch = async (symbol: string) => {
+    if (!favorites.includes(symbol)) {
+      setFavorites(prev => [...prev, symbol]);
+    }
+    setSearchOpen(false);
     setSearchQuery('');
-    setSearchResults([]);
     
-    // Fetch data for new symbol
-    const newData = await fetchCryptoData([symbol], priceMap);
-    setWatchlistData(prev => [...prev, ...newData]);
-  };
-
-  const removeFromWatchlist = (symbol: string) => {
-    setWatchlistSymbols(prev => prev.filter(s => s !== symbol));
-    setWatchlistData(prev => prev.filter(d => d.symbol + 'USDT' !== symbol));
-  };
-
-  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setDragOver(false);
-    const symbol = e.dataTransfer.getData('text/plain');
-    if (symbol) {
-      addToWatchlist(symbol);
+    // Fetch data for new coin
+    if (!data.find(d => d.symbol === symbol.replace('USDT', ''))) {
+      const newData = await fetchCryptoData([symbol], priceMap);
+      setData(prev => [...newData, ...prev]);
     }
   };
 
+  // Sort: favorites first, then rest
+  const sortedData = [...data].sort((a, b) => {
+    const aFav = favorites.includes(a.symbol + 'USDT');
+    const bFav = favorites.includes(b.symbol + 'USDT');
+    if (aFav && !bFav) return -1;
+    if (!aFav && bFav) return 1;
+    return 0;
+  });
+
   return (
-    <main className="min-h-screen bg-gray-950 text-white p-4">
-      <div className="max-w-[1900px] mx-auto">
-        <header className="mb-4">
-          <h1 className="text-2xl font-bold mb-1">Crypto RSI Dashboard</h1>
-          <p className="text-gray-400 text-sm">
-            Click any coin for AI analysis • RSI: 14, 50, 75, 100, 200 • 
-            <span className="text-green-400 ml-2">●</span> Oversold 
-            <span className="text-red-400 ml-2">●</span> Overbought
-          </p>
-          <div className="flex items-center gap-4 mt-2">
-            <p className="text-gray-500 text-sm">
-              {loading ? 'Loading...' : `Updated: ${lastUpdated}`}
-            </p>
-            <button 
-              onClick={loadData}
-              disabled={loading}
-              className="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-sm disabled:opacity-50"
-            >
-              Refresh
-            </button>
-          </div>
-          {error && <p className="text-red-500 text-sm mt-2">{error}</p>}
-        </header>
-
-        <div className="flex gap-4">
-          {/* Main Table - Majors */}
-          <div className="flex-1 min-w-0">
-            <CryptoTable 
-              data={majorData} 
-              loading={loading} 
-              title="Top 10 Majors"
-              onDragStart={() => {}}
-              onCoinClick={setSelectedCrypto}
-            />
-          </div>
-
-          {/* Watchlist Panel */}
-          <div 
-            className={`w-[800px] flex-shrink-0 border-l border-gray-800 pl-4 ${dragOver ? 'bg-gray-900/50' : ''}`}
-            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={handleDrop}
-          >
-            <div className="mb-4">
-              <h2 className="text-xl font-bold mb-2 text-gray-300">Watchlist</h2>
-              
-              {/* Search */}
-              <div className="relative">
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search coin (e.g. PEPE, DOGE)..."
-                  className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm focus:outline-none focus:border-gray-500"
-                />
-                
-                {/* Search Results Dropdown */}
-                {searchResults.length > 0 && (
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-gray-900 border border-gray-700 rounded shadow-lg z-20 max-h-60 overflow-auto">
-                    {searchResults.map(symbol => (
-                      <div
-                        key={symbol}
-                        className="px-3 py-2 hover:bg-gray-800 cursor-pointer flex justify-between items-center"
-                        onClick={() => addToWatchlist(symbol)}
-                        draggable
-                        onDragStart={(e) => {
-                          e.dataTransfer.setData('text/plain', symbol);
-                        }}
-                      >
-                        <span className="font-mono">{symbol.replace('USDT', '')}</span>
-                        <span className="text-gray-500 text-xs">
-                          ${priceMap[symbol] ? formatPrice(priceMap[symbol]) : '-'}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                
-                {searching && (
-                  <div className="absolute right-3 top-2 text-gray-500 text-sm">...</div>
-                )}
-              </div>
-              
-              <p className="text-gray-600 text-xs mt-2">
-                Search and click to add, or drag from majors/search
+    <main className="min-h-screen bg-zinc-950 text-foreground">
+      {/* Header */}
+      <header className="sticky top-0 z-40 bg-zinc-950/95 backdrop-blur border-b border-zinc-800">
+        <div className="max-w-[1600px] mx-auto px-4 py-3">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h1 className="text-xl font-bold tracking-tight">Crypto RSI</h1>
+              <p className="text-xs text-muted-foreground">
+                Click any coin for AI analysis
               </p>
             </div>
 
-            {/* Watchlist Table */}
-            {watchlistSymbols.length > 0 ? (
-              <CryptoTable 
-                data={watchlistData} 
-                loading={loading} 
-                title=""
-                showRemove={true}
-                onRemove={removeFromWatchlist}
-                onCoinClick={setSelectedCrypto}
-              />
-            ) : (
-              <div className={`border-2 border-dashed rounded-lg p-8 text-center ${dragOver ? 'border-blue-500 bg-blue-500/10' : 'border-gray-700'}`}>
-                <p className="text-gray-500">Drag coins here or search above</p>
-              </div>
-            )}
+            <div className="flex items-center gap-2">
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => setSearchOpen(true)}
+                className="gap-2"
+              >
+                <Search className="h-4 w-4" />
+                <span className="hidden sm:inline">Search</span>
+              </Button>
+              
+              <Button 
+                variant="ghost" 
+                size="sm"
+                onClick={loadData}
+                disabled={loading}
+                className="gap-2"
+              >
+                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">{lastUpdated || 'Refresh'}</span>
+              </Button>
+            </div>
+          </div>
+
+          {/* Legend */}
+          <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              Oversold (&lt;30)
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-red-500" />
+              Overbought (&gt;70)
+            </span>
+            <span className="flex items-center gap-1">
+              <Star className="h-3 w-3 fill-yellow-500 text-yellow-500" />
+              Favorited
+            </span>
+          </div>
+        </div>
+      </header>
+
+      {/* Table */}
+      <div className="max-w-[1600px] mx-auto px-4 py-4">
+        <div className="rounded-lg border border-zinc-800 overflow-hidden">
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-zinc-900/50 border-zinc-800 hover:bg-zinc-900/50">
+                  <TableHead className="w-10"></TableHead>
+                  <TableHead className="font-semibold">Asset</TableHead>
+                  <TableHead className="text-right font-semibold">Price</TableHead>
+                  {TIMEFRAMES.map(tf => (
+                    <TableHead 
+                      key={tf.label} 
+                      colSpan={RSI_PERIODS.length} 
+                      className="text-center font-semibold border-l border-zinc-800"
+                    >
+                      {tf.label}
+                    </TableHead>
+                  ))}
+                </TableRow>
+                <TableRow className="bg-zinc-900/30 border-zinc-800 hover:bg-zinc-900/30">
+                  <TableHead></TableHead>
+                  <TableHead></TableHead>
+                  <TableHead></TableHead>
+                  {TIMEFRAMES.map(tf => (
+                    RSI_PERIODS.map(period => (
+                      <TableHead 
+                        key={`${tf.label}-${period}`} 
+                        className="text-center text-xs text-muted-foreground font-normal py-1"
+                      >
+                        {period}
+                      </TableHead>
+                    ))
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sortedData.map((crypto) => {
+                  const isFav = favorites.includes(crypto.symbol + 'USDT');
+                  return (
+                    <TableRow 
+                      key={crypto.symbol}
+                      className={`border-zinc-800/50 cursor-pointer transition-colors hover:bg-zinc-900/50 ${isFav ? 'bg-yellow-500/5' : ''}`}
+                      onClick={() => setSelectedCrypto(crypto)}
+                    >
+                      <TableCell className="w-10" onClick={(e) => e.stopPropagation()}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0"
+                          onClick={() => toggleFavorite(crypto.symbol)}
+                        >
+                          <Star className={`h-4 w-4 ${isFav ? 'fill-yellow-500 text-yellow-500' : 'text-muted-foreground'}`} />
+                        </Button>
+                      </TableCell>
+                      <TableCell>
+                        <div className="font-semibold">{crypto.symbol}</div>
+                        <div className="text-xs text-muted-foreground">{crypto.name}</div>
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-sm">
+                        ${formatPrice(crypto.price)}
+                      </TableCell>
+                      {TIMEFRAMES.map(tf => (
+                        RSI_PERIODS.map(period => (
+                          <TableCell 
+                            key={`${crypto.symbol}-${tf.label}-${period}`} 
+                            className="text-center py-2"
+                          >
+                            <RSICell value={crypto.timeframes[tf.label]?.[period] ?? null} />
+                          </TableCell>
+                        ))
+                      ))}
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
           </div>
         </div>
 
-        <footer className="mt-6 text-center text-gray-600 text-xs">
-          <p>Data from Binance • AI by Grok • Auto-refreshes every 60 seconds</p>
-        </footer>
+        <p className="text-center text-xs text-muted-foreground mt-4">
+          Binance data • Grok AI • Auto-refresh 60s
+        </p>
       </div>
 
+      {/* Search Dialog */}
+      <Dialog open={searchOpen} onOpenChange={setSearchOpen}>
+        <DialogContent className="max-w-md bg-zinc-950 border-zinc-800 p-0">
+          <Command className="bg-transparent">
+            <CommandInput 
+              placeholder="Search coins..." 
+              value={searchQuery}
+              onValueChange={setSearchQuery}
+              className="border-b border-zinc-800"
+            />
+            <CommandList>
+              <CommandEmpty>No results found.</CommandEmpty>
+              <CommandGroup>
+                {searchResults.map(symbol => (
+                  <CommandItem 
+                    key={symbol}
+                    onSelect={() => addFromSearch(symbol)}
+                    className="cursor-pointer"
+                  >
+                    <span className="font-mono font-semibold">{symbol.replace('USDT', '')}</span>
+                    <span className="ml-2 text-muted-foreground text-sm">
+                      ${priceMap[symbol] ? formatPrice(priceMap[symbol]) : '-'}
+                    </span>
+                    {favorites.includes(symbol) && (
+                      <Star className="ml-auto h-3 w-3 fill-yellow-500 text-yellow-500" />
+                    )}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </DialogContent>
+      </Dialog>
+
       {/* Analysis Modal */}
-      {selectedCrypto && (
-        <AnalysisModal 
-          crypto={selectedCrypto} 
-          onClose={() => setSelectedCrypto(null)} 
-        />
-      )}
+      <AnalysisModal 
+        crypto={selectedCrypto}
+        open={!!selectedCrypto}
+        onClose={() => setSelectedCrypto(null)}
+      />
     </main>
   );
 }
