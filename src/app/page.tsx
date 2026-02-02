@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { TIMEFRAMES, RSI_PERIODS, TOP_CRYPTOS, SYMBOL_NAMES, RSIData } from '@/lib/binance';
 import { calculateRSI } from '@/lib/rsi';
 import { calculateConfluence, isExtreme, type ScannerResult } from '@/lib/analysis';
+import { binanceWs } from '@/lib/websocket';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -605,6 +606,8 @@ export default function Home() {
   const [scannerResults, setScannerResults] = useState<ScannerResult[]>([]);
   const [scanning, setScanning] = useState(false);
   const [alertPerformance, setAlertPerformance] = useState<AlertPerformance[]>([]);
+  const [priceFlash, setPriceFlash] = useState<Record<string, 'up' | 'down' | 'none'>>({});
+  const [wsConnected, setWsConnected] = useState(false);
   const triggeredAlertsRef = useRef<Set<string>>(new Set());
 
   const addNotificationLog = useCallback((log: NotificationLog) => {
@@ -711,9 +714,45 @@ export default function Home() {
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 60000);
+    // Slower polling for RSI (every 30s) since prices are real-time
+    const interval = setInterval(loadData, 30000);
     return () => clearInterval(interval);
   }, [loadData]);
+
+  // WebSocket for real-time prices
+  useEffect(() => {
+    const allSymbols = [...new Set([...favorites, ...TOP_CRYPTOS])];
+    
+    binanceWs.connect(allSymbols);
+    setWsConnected(true);
+
+    binanceWs.onPrice((symbol, price, change) => {
+      // Update price in data
+      setData(prev => prev.map(crypto => {
+        if (crypto.symbol + 'USDT' === symbol) {
+          return { ...crypto, price };
+        }
+        return crypto;
+      }));
+
+      // Update price map
+      setPriceMap(prev => ({ ...prev, [symbol]: price }));
+
+      // Flash effect
+      if (change !== 'none') {
+        const displaySymbol = symbol.replace('USDT', '');
+        setPriceFlash(prev => ({ ...prev, [displaySymbol]: change }));
+        setTimeout(() => {
+          setPriceFlash(prev => ({ ...prev, [displaySymbol]: 'none' }));
+        }, 500);
+      }
+    });
+
+    return () => {
+      binanceWs.disconnect();
+      setWsConnected(false);
+    };
+  }, [favorites]);
 
   // Search
   useEffect(() => {
@@ -912,16 +951,24 @@ export default function Home() {
                 <span className="hidden sm:inline">Search</span>
               </Button>
               
-              <Button 
-                variant="ghost" 
-                size="sm"
-                onClick={loadData}
-                disabled={loading}
-                className="gap-2 text-white hover:bg-zinc-800"
-              >
-                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-                <span className="hidden sm:inline">{lastUpdated || 'Refresh'}</span>
-              </Button>
+              <div className="flex items-center gap-1">
+                {wsConnected && (
+                  <span className="flex items-center gap-1 text-xs text-emerald-400 mr-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    LIVE
+                  </span>
+                )}
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={loadData}
+                  disabled={loading}
+                  className="gap-2 text-white hover:bg-zinc-800"
+                >
+                  <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                  <span className="hidden sm:inline">{lastUpdated || 'Refresh'}</span>
+                </Button>
+              </div>
             </div>
           </div>
 
@@ -1098,7 +1145,10 @@ export default function Home() {
                           confluence.signal === 'strong_sell' ? 'bg-red-900/20' : 'bg-zinc-950'
                         }`}>
                         <div className="flex items-center justify-end gap-2">
-                          <span>${formatPrice(crypto.price)}</span>
+                          <span className={`transition-colors duration-300 ${
+                            priceFlash[crypto.symbol] === 'up' ? 'text-emerald-400' :
+                            priceFlash[crypto.symbol] === 'down' ? 'text-red-400' : ''
+                          }`}>${formatPrice(crypto.price)}</span>
                           {isStrong && (
                             <span className={`flex items-center gap-0.5 text-xs px-1.5 py-0.5 rounded ${
                               confluence.signal === 'strong_buy' 
