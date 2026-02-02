@@ -31,7 +31,11 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Star, Search, RefreshCw, TrendingUp, TrendingDown, Minus, Bell, BellRing, Zap, Radar } from 'lucide-react';
+import { Star, Search, RefreshCw, TrendingUp, TrendingDown, Minus, Bell, BellRing, Zap, Radar, ExternalLink, Grid3X3, BarChart3, Activity } from 'lucide-react';
+import { fetchFundingRates, formatFundingRate, getFundingColor, type FundingRate } from '@/lib/funding';
+import { fetchFearGreed, getFearGreedColor, getFearGreedEmoji, type FearGreedData } from '@/lib/feargreed';
+import { detectDivergence, calculateRSIArray, type DivergenceResult } from '@/lib/divergence';
+import { runBacktest, type BacktestResult } from '@/lib/backtest';
 
 // Types
 interface Alert {
@@ -609,6 +613,16 @@ export default function Home() {
   const [priceFlash, setPriceFlash] = useState<Record<string, 'up' | 'down' | 'none'>>({});
   const [wsConnected, setWsConnected] = useState(false);
   const triggeredAlertsRef = useRef<Set<string>>(new Set());
+  
+  // New feature states
+  const [fundingRates, setFundingRates] = useState<Record<string, FundingRate>>({});
+  const [fearGreed, setFearGreed] = useState<FearGreedData | null>(null);
+  const [divergences, setDivergences] = useState<Record<string, DivergenceResult>>({});
+  const [viewMode, setViewMode] = useState<'table' | 'heatmap'>('table');
+  const [backtestCrypto, setBacktestCrypto] = useState<RSIData | null>(null);
+  const [backtestResult, setBacktestResult] = useState<BacktestResult | null>(null);
+  const [backtestLoading, setBacktestLoading] = useState(false);
+  const [backtestTimeframe, setBacktestTimeframe] = useState('4h');
 
   const addNotificationLog = useCallback((log: NotificationLog) => {
     setNotificationLogs(prev => [log, ...prev].slice(0, 50)); // Keep last 50
@@ -699,6 +713,35 @@ export default function Home() {
           checkedAt: Date.now()
         };
       }));
+      
+      // Fetch funding rates
+      const funding = await fetchFundingRates();
+      setFundingRates(funding);
+      
+      // Fetch Fear & Greed
+      const fng = await fetchFearGreed();
+      setFearGreed(fng);
+      
+      // Detect divergences for each crypto on 4h timeframe
+      const divs: Record<string, DivergenceResult> = {};
+      for (const crypto of rsiData) {
+        try {
+          const klinesRes = await fetch(
+            `https://api.binance.com/api/v3/klines?symbol=${crypto.symbol}USDT&interval=4h&limit=50`
+          );
+          const klines = await klinesRes.json();
+          if (Array.isArray(klines) && klines.length > 20) {
+            const closes = klines.map((k: (string | number)[]) => parseFloat(String(k[4])));
+            const rsiArr = calculateRSIArray(closes, 14);
+            const div = detectDivergence(closes, rsiArr, 30);
+            if (div) {
+              div.timeframe = '4h';
+              divs[crypto.symbol] = div;
+            }
+          }
+        } catch {}
+      }
+      setDivergences(divs);
       
       setLastUpdated(new Date().toLocaleTimeString('en-US', { 
         timeZone: 'Europe/Budapest',
@@ -923,11 +966,26 @@ export default function Home() {
       <header className="sticky top-0 z-40 bg-zinc-950/95 backdrop-blur border-b border-zinc-800">
         <div className="max-w-[1600px] mx-auto px-4 py-3">
           <div className="flex items-center justify-between gap-4">
-            <div>
-              <h1 className="text-xl font-bold tracking-tight">Crypto RSI</h1>
-              <p className="text-xs text-zinc-400">
-                Click coin for AI • Bell for alerts
-              </p>
+            <div className="flex items-center gap-4">
+              <div>
+                <h1 className="text-xl font-bold tracking-tight">Crypto RSI</h1>
+                <p className="text-xs text-zinc-400">
+                  Click coin for AI • Bell for alerts
+                </p>
+              </div>
+              
+              {/* Fear & Greed Index */}
+              {fearGreed && (
+                <div className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg border ${getFearGreedColor(fearGreed.value).bg} ${getFearGreedColor(fearGreed.value).border}`}>
+                  <span className="text-lg">{getFearGreedEmoji(fearGreed.value)}</span>
+                  <div className="flex flex-col">
+                    <span className={`text-sm font-bold ${getFearGreedColor(fearGreed.value).text}`}>
+                      {fearGreed.value}
+                    </span>
+                    <span className="text-[10px] text-zinc-400">{fearGreed.classification}</span>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-2">
@@ -998,6 +1056,31 @@ export default function Home() {
                   <Zap className="h-3 w-3 text-yellow-400" />
                   Confluence (3+ TF)
                 </span>
+                <span className="flex items-center gap-1">
+                  <Activity className="h-3 w-3 text-purple-400" />
+                  Divergence
+                </span>
+              </div>
+              
+              {/* View Mode Toggle */}
+              <div className="flex items-center gap-1 bg-zinc-800 rounded-lg p-0.5">
+                <button
+                  onClick={() => setViewMode('table')}
+                  className={`px-2 py-1 text-xs rounded transition-colors ${
+                    viewMode === 'table' ? 'bg-zinc-600 text-white' : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  Table
+                </button>
+                <button
+                  onClick={() => setViewMode('heatmap')}
+                  className={`px-2 py-1 text-xs rounded transition-colors flex items-center gap-1 ${
+                    viewMode === 'heatmap' ? 'bg-zinc-600 text-white' : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  <Grid3X3 className="h-3 w-3" />
+                  Heatmap
+                </button>
               </div>
             </div>
             
@@ -1054,8 +1137,70 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Table */}
+      {/* Main Content */}
       <div className="max-w-[1600px] mx-auto px-4 py-4">
+        
+        {/* Heatmap View */}
+        {viewMode === 'heatmap' && (
+          <div className="rounded-lg border border-zinc-800 overflow-hidden mb-4">
+            <div className="bg-zinc-900 px-4 py-3 border-b border-zinc-800">
+              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                <Grid3X3 className="h-4 w-4 text-blue-400" />
+                RSI Heatmap (RSI14)
+              </h3>
+            </div>
+            <div className="p-4 overflow-x-auto">
+              <div className="grid gap-1" style={{ gridTemplateColumns: `120px repeat(${TIMEFRAMES.length}, 60px)` }}>
+                {/* Header row */}
+                <div className="text-xs text-zinc-400 font-medium p-2">Asset</div>
+                {TIMEFRAMES.map(tf => (
+                  <div key={tf.label} className="text-xs text-zinc-400 font-medium p-2 text-center">{tf.label}</div>
+                ))}
+                
+                {/* Data rows */}
+                {sortedData.map(crypto => (
+                  <>
+                    <div key={`${crypto.symbol}-label`} className="text-sm text-white font-medium p-2 flex items-center gap-1">
+                      {crypto.symbol}
+                      {divergences[crypto.symbol] && (
+                        <span className={`text-[10px] ${divergences[crypto.symbol].type === 'bullish' ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {divergences[crypto.symbol].type === 'bullish' ? '↗' : '↘'}
+                        </span>
+                      )}
+                    </div>
+                    {TIMEFRAMES.map(tf => {
+                      const rsi = crypto.timeframes[tf.label]?.[14];
+                      let bgColor = 'bg-zinc-800';
+                      if (rsi !== null && rsi !== undefined) {
+                        if (rsi < 20) bgColor = 'bg-emerald-500';
+                        else if (rsi < 30) bgColor = 'bg-emerald-600';
+                        else if (rsi < 40) bgColor = 'bg-emerald-800/60';
+                        else if (rsi < 50) bgColor = 'bg-zinc-700';
+                        else if (rsi < 60) bgColor = 'bg-zinc-700';
+                        else if (rsi < 70) bgColor = 'bg-red-800/60';
+                        else if (rsi < 80) bgColor = 'bg-red-600';
+                        else bgColor = 'bg-red-500';
+                      }
+                      return (
+                        <div 
+                          key={`${crypto.symbol}-${tf.label}`}
+                          className={`${bgColor} rounded p-2 text-center text-xs font-mono text-white cursor-pointer hover:opacity-80 transition-opacity`}
+                          onClick={() => setSelectedCrypto(crypto)}
+                          title={`${crypto.symbol} ${tf.label}: RSI ${rsi?.toFixed(1) ?? 'N/A'}`}
+                        >
+                          {rsi?.toFixed(0) ?? '-'}
+                        </div>
+                      );
+                    })}
+                  </>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {/* Table View */}
+        {viewMode === 'table' && (
         <div className="rounded-lg border border-zinc-800 overflow-hidden">
           <div className="overflow-x-auto">
             <Table>
@@ -1138,27 +1283,69 @@ export default function Home() {
                         </Button>
                       </TableCell>
                       <TableCell className={`sticky left-20 z-10 min-w-[100px] ${isFav ? 'bg-yellow-950/30' : 'bg-zinc-950'}`}>
-                        <div className="font-semibold text-white">{crypto.symbol}</div>
+                        <div className="flex items-center gap-1">
+                          <span className="font-semibold text-white">{crypto.symbol}</span>
+                          {/* Divergence Badge */}
+                          {divergences[crypto.symbol] && (
+                            <span className={`text-[10px] px-1 py-0.5 rounded ${
+                              divergences[crypto.symbol].type === 'bullish' 
+                                ? 'bg-emerald-800 text-emerald-200' 
+                                : 'bg-red-800 text-red-200'
+                            }`}>
+                              {divergences[crypto.symbol].type === 'bullish' ? '↗' : '↘'}
+                            </span>
+                          )}
+                          {/* TradingView Link */}
+                          <a
+                            href={`https://www.tradingview.com/chart/?symbol=BINANCE:${crypto.symbol}USDT`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-zinc-500 hover:text-blue-400 transition-colors"
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                          {/* Backtest Button */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setBacktestCrypto(crypto);
+                              setBacktestResult(null);
+                            }}
+                            className="text-zinc-500 hover:text-purple-400 transition-colors"
+                            title="Backtest RSI signals"
+                          >
+                            <BarChart3 className="h-3 w-3" />
+                          </button>
+                        </div>
                         <div className="text-xs text-zinc-400">{crypto.name}</div>
                       </TableCell>
-                      <TableCell className={`text-right font-mono text-sm text-white pr-2 sticky left-[180px] z-10 min-w-[120px] shadow-[4px_0_8px_-2px_rgba(0,0,0,0.8)] ${
+                      <TableCell className={`text-right font-mono text-sm text-white pr-2 sticky left-[180px] z-10 min-w-[140px] shadow-[4px_0_8px_-2px_rgba(0,0,0,0.8)] ${
                           isFav ? 'bg-yellow-950/30' : 
                           confluence.signal === 'strong_buy' ? 'bg-emerald-900/20' :
                           confluence.signal === 'strong_sell' ? 'bg-red-900/20' : 'bg-zinc-950'
                         }`}>
-                        <div className="flex items-center justify-end gap-2">
-                          <span className={`transition-colors duration-300 ${
-                            priceFlash[crypto.symbol] === 'up' ? 'text-emerald-400' :
-                            priceFlash[crypto.symbol] === 'down' ? 'text-red-400' : ''
-                          }`}>${formatPrice(crypto.price)}</span>
-                          {isStrong && (
-                            <span className={`flex items-center gap-0.5 text-xs px-1.5 py-0.5 rounded ${
-                              confluence.signal === 'strong_buy' 
-                                ? 'bg-emerald-600 text-white' 
-                                : 'bg-red-600 text-white'
-                            }`}>
-                              <Zap className="h-3 w-3" />
-                              {confluence.oversoldCount || confluence.overboughtCount}
+                        <div className="flex flex-col items-end gap-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className={`transition-colors duration-300 ${
+                              priceFlash[crypto.symbol] === 'up' ? 'text-emerald-400' :
+                              priceFlash[crypto.symbol] === 'down' ? 'text-red-400' : ''
+                            }`}>${formatPrice(crypto.price)}</span>
+                            {isStrong && (
+                              <span className={`flex items-center gap-0.5 text-xs px-1.5 py-0.5 rounded ${
+                                confluence.signal === 'strong_buy' 
+                                  ? 'bg-emerald-600 text-white' 
+                                  : 'bg-red-600 text-white'
+                              }`}>
+                                <Zap className="h-3 w-3" />
+                                {confluence.oversoldCount || confluence.overboughtCount}
+                              </span>
+                            )}
+                          </div>
+                          {/* Funding Rate */}
+                          {fundingRates[crypto.symbol + 'USDT'] && (
+                            <span className={`text-[10px] px-1 py-0.5 rounded ${getFundingColor(fundingRates[crypto.symbol + 'USDT'].fundingRate).bg} ${getFundingColor(fundingRates[crypto.symbol + 'USDT'].fundingRate).text}`}>
+                              {formatFundingRate(fundingRates[crypto.symbol + 'USDT'].fundingRate)}
                             </span>
                           )}
                         </div>
@@ -1182,6 +1369,7 @@ export default function Home() {
             </Table>
           </div>
         </div>
+        )}
 
         <p className="text-center text-xs text-zinc-500 mt-4">
           Binance data • Grok AI • Auto-refresh 60s
@@ -1492,6 +1680,150 @@ export default function Home() {
         onSaveAlert={handleSaveAlert}
         onDeleteAlert={handleDeleteAlert}
       />
+
+      {/* Backtest Modal */}
+      <Dialog open={!!backtestCrypto} onOpenChange={(o) => !o && setBacktestCrypto(null)}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-auto bg-zinc-950 border-zinc-800">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-3 text-white">
+              <BarChart3 className="h-5 w-5 text-purple-400" />
+              RSI Backtest: {backtestCrypto?.symbol}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* Timeframe Selector */}
+            <div className="flex items-center gap-3">
+              <Label className="text-zinc-400">Timeframe:</Label>
+              <Select value={backtestTimeframe} onValueChange={(v) => {
+                setBacktestTimeframe(v);
+                setBacktestResult(null);
+              }}>
+                <SelectTrigger className="w-32 bg-zinc-800 border-zinc-700 text-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-zinc-800 border-zinc-700">
+                  <SelectItem value="1h" className="text-white">1H</SelectItem>
+                  <SelectItem value="4h" className="text-white">4H</SelectItem>
+                  <SelectItem value="1d" className="text-white">1D</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button 
+                onClick={async () => {
+                  if (!backtestCrypto) return;
+                  setBacktestLoading(true);
+                  const result = await runBacktest(backtestCrypto.symbol, backtestTimeframe);
+                  setBacktestResult(result);
+                  setBacktestLoading(false);
+                }}
+                disabled={backtestLoading}
+                className="bg-purple-600 hover:bg-purple-700"
+              >
+                {backtestLoading ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                    Running...
+                  </>
+                ) : 'Run Backtest'}
+              </Button>
+            </div>
+
+            {backtestResult && (
+              <>
+                {/* Stats Cards */}
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Oversold Stats */}
+                  <div className="bg-emerald-900/30 rounded-lg p-4 border border-emerald-800">
+                    <h4 className="text-emerald-400 font-semibold mb-2 flex items-center gap-2">
+                      <TrendingUp className="h-4 w-4" />
+                      Oversold Signals (RSI &lt; 30)
+                    </h4>
+                    <div className="text-sm space-y-1 text-white">
+                      <p>Signals: <span className="font-mono">{backtestResult.oversoldStats.count}</span></p>
+                      {backtestTimeframe !== '1d' && (
+                        <p>Win Rate 1h: <span className={`font-mono ${backtestResult.oversoldStats.winRate1h >= 50 ? 'text-emerald-400' : 'text-red-400'}`}>{backtestResult.oversoldStats.winRate1h.toFixed(1)}%</span></p>
+                      )}
+                      {backtestTimeframe === '1h' && (
+                        <p>Win Rate 4h: <span className={`font-mono ${backtestResult.oversoldStats.winRate4h >= 50 ? 'text-emerald-400' : 'text-red-400'}`}>{backtestResult.oversoldStats.winRate4h.toFixed(1)}%</span></p>
+                      )}
+                      <p>Win Rate 24h: <span className={`font-mono ${backtestResult.oversoldStats.winRate24h >= 50 ? 'text-emerald-400' : 'text-red-400'}`}>{backtestResult.oversoldStats.winRate24h.toFixed(1)}%</span></p>
+                      <p>Avg Return 24h: <span className={`font-mono ${backtestResult.oversoldStats.avgReturn24h >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{backtestResult.oversoldStats.avgReturn24h >= 0 ? '+' : ''}{backtestResult.oversoldStats.avgReturn24h.toFixed(2)}%</span></p>
+                    </div>
+                  </div>
+
+                  {/* Overbought Stats */}
+                  <div className="bg-red-900/30 rounded-lg p-4 border border-red-800">
+                    <h4 className="text-red-400 font-semibold mb-2 flex items-center gap-2">
+                      <TrendingDown className="h-4 w-4" />
+                      Overbought Signals (RSI &gt; 70)
+                    </h4>
+                    <div className="text-sm space-y-1 text-white">
+                      <p>Signals: <span className="font-mono">{backtestResult.overboughtStats.count}</span></p>
+                      {backtestTimeframe !== '1d' && (
+                        <p>Win Rate 1h: <span className={`font-mono ${backtestResult.overboughtStats.winRate1h >= 50 ? 'text-emerald-400' : 'text-red-400'}`}>{backtestResult.overboughtStats.winRate1h.toFixed(1)}%</span></p>
+                      )}
+                      {backtestTimeframe === '1h' && (
+                        <p>Win Rate 4h: <span className={`font-mono ${backtestResult.overboughtStats.winRate4h >= 50 ? 'text-emerald-400' : 'text-red-400'}`}>{backtestResult.overboughtStats.winRate4h.toFixed(1)}%</span></p>
+                      )}
+                      <p>Win Rate 24h: <span className={`font-mono ${backtestResult.overboughtStats.winRate24h >= 50 ? 'text-emerald-400' : 'text-red-400'}`}>{backtestResult.overboughtStats.winRate24h.toFixed(1)}%</span></p>
+                      <p>Avg Return 24h: <span className={`font-mono ${backtestResult.overboughtStats.avgReturn24h >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{backtestResult.overboughtStats.avgReturn24h >= 0 ? '+' : ''}{backtestResult.overboughtStats.avgReturn24h.toFixed(2)}%</span></p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Recent Signals Table */}
+                <div className="bg-zinc-900/50 rounded-lg border border-zinc-800">
+                  <div className="px-4 py-2 border-b border-zinc-800">
+                    <p className="text-sm text-zinc-400">Recent Signals (last 50)</p>
+                  </div>
+                  <div className="max-h-48 overflow-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="border-zinc-800">
+                          <TableHead className="text-white text-xs">Date</TableHead>
+                          <TableHead className="text-white text-xs">Type</TableHead>
+                          <TableHead className="text-white text-xs">RSI</TableHead>
+                          <TableHead className="text-white text-xs">Price</TableHead>
+                          <TableHead className="text-white text-xs">24h Return</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {backtestResult.signals.slice(0, 20).map((signal, i) => (
+                          <TableRow key={i} className="border-zinc-800/50">
+                            <TableCell className="text-xs text-zinc-400">
+                              {new Date(signal.timestamp).toLocaleDateString()}
+                            </TableCell>
+                            <TableCell>
+                              <span className={`text-xs px-1.5 py-0.5 rounded ${
+                                signal.type === 'oversold' ? 'bg-emerald-800 text-emerald-200' : 'bg-red-800 text-red-200'
+                              }`}>
+                                {signal.type}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-xs font-mono text-white">{signal.rsi.toFixed(1)}</TableCell>
+                            <TableCell className="text-xs font-mono text-white">${formatPrice(signal.price)}</TableCell>
+                            <TableCell className={`text-xs font-mono ${
+                              signal.return24h !== null && signal.return24h >= 0 ? 'text-emerald-400' : 'text-red-400'
+                            }`}>
+                              {signal.return24h !== null ? `${signal.return24h >= 0 ? '+' : ''}${signal.return24h.toFixed(2)}%` : '-'}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {!backtestResult && !backtestLoading && (
+              <p className="text-zinc-500 text-center py-8">
+                Select a timeframe and click "Run Backtest" to analyze historical RSI signals
+              </p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }
