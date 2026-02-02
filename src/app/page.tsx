@@ -171,7 +171,11 @@ function AlertModal({
               
               <div>
                 <Label className="text-xs text-zinc-400">Condition</Label>
-                <Select value={condition} onValueChange={(v) => setCondition(v as 'below' | 'above')}>
+                <Select value={condition} onValueChange={(v) => {
+                  const newCondition = v as 'below' | 'above';
+                  setCondition(newCondition);
+                  setThreshold(newCondition === 'below' ? 30 : 70);
+                }}>
                   <SelectTrigger className="bg-zinc-700 border-zinc-600 text-white">
                     <SelectValue />
                   </SelectTrigger>
