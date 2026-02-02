@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const GROK_API_KEY = process.env.GROK_API_KEY;
-
 interface RSIData {
   symbol: string;
   name: string;
@@ -170,17 +168,18 @@ Provide a brief 2-3 sentence trading recommendation. Be specific about:
 Keep it under 100 words. Be direct and actionable.`;
 
     let grokAnalysis = '';
+    const grokApiKey = process.env.GROK_API_KEY;
     
-    if (GROK_API_KEY) {
+    if (grokApiKey) {
       try {
         const grokRes = await fetch('https://api.x.ai/v1/chat/completions', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${GROK_API_KEY}`
+            'Authorization': `Bearer ${grokApiKey}`
           },
           body: JSON.stringify({
-            model: 'grok-2-latest',
+            model: 'grok-3',
             messages: [
               { role: 'system', content: 'You are a professional crypto trader giving quick, actionable signals. Be concise and direct.' },
               { role: 'user', content: prompt }
