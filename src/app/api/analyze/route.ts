@@ -151,7 +151,7 @@ export async function POST(request: NextRequest) {
       })
       .join('\n');
 
-    const prompt = `You are a crypto trading analyst. Analyze this RSI data for ${cryptoData.symbol} (${cryptoData.name}) at $${cryptoData.price.toFixed(4)} and give a concise trading signal.
+    const prompt = `You are a crypto trading analyst. Analyze this RSI data for ${cryptoData.symbol} (${cryptoData.name}) at $${cryptoData.price.toFixed(4)}.
 
 RSI Data across timeframes:
 ${rsiSummary}
@@ -160,12 +160,19 @@ Rule-based signal detected: ${signals.type.replace('_', ' ').toUpperCase()} (${s
 Key observations:
 ${signals.reasons.map(r => '- ' + r).join('\n')}
 
-Provide a brief 2-3 sentence trading recommendation. Be specific about:
-1. Whether to act NOW or wait
-2. If acting: scalp or swing, long or short
-3. Key levels to watch or invalidation
+Provide analysis for BOTH trading styles:
 
-Keep it under 100 words. Be direct and actionable.`;
+**SCALPING** (1m-15m timeframes, RSI 5/9/14):
+- Is there a scalp opportunity right now?
+- Direction (long/short) and confidence
+- Quick entry/exit levels
+
+**SWING TRADING** (1h-1d timeframes, RSI 14/50/75):
+- Is there a swing setup forming?
+- Direction and timeframe to hold
+- Key support/resistance levels
+
+Keep each section to 2-3 sentences. Be direct and actionable.`;
 
     let grokAnalysis = '';
     const grokApiKey = process.env.GROK_API_KEY;
@@ -184,7 +191,7 @@ Keep it under 100 words. Be direct and actionable.`;
               { role: 'system', content: 'You are a professional crypto trader giving quick, actionable signals. Be concise and direct.' },
               { role: 'user', content: prompt }
             ],
-            max_tokens: 200,
+            max_tokens: 400,
             temperature: 0.7
           })
         });
