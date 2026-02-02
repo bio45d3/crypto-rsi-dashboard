@@ -36,6 +36,12 @@ import { fetchFundingRates, formatFundingRate, getFundingColor, type FundingRate
 import { fetchFearGreed, getFearGreedColor, getFearGreedEmoji, type FearGreedData } from '@/lib/feargreed';
 import { detectDivergence, calculateRSIArray, type DivergenceResult } from '@/lib/divergence';
 import { runBacktest, type BacktestResult } from '@/lib/backtest';
+import { 
+  calculateTrendState, calculateStretchState, calculateSwingBias, calculateScalpBias,
+  calculateRegime, calculateConfidence, checkScalpLong, checkScalpShort,
+  checkSwingLong, checkSwingShort, detectBullFlip, detectBearFlip,
+  type TrendState, type SignalResult, type TimeframeAnalysis, type SignalType
+} from '@/lib/signals';
 
 // Types
 interface Alert {
@@ -623,6 +629,9 @@ export default function Home() {
   const [backtestResult, setBacktestResult] = useState<BacktestResult | null>(null);
   const [backtestLoading, setBacktestLoading] = useState(false);
   const [backtestTimeframe, setBacktestTimeframe] = useState('4h');
+  const [signalResults, setSignalResults] = useState<SignalResult[]>([]);
+  const [signalScanning, setSignalScanning] = useState(false);
+  const [selectedSignal, setSelectedSignal] = useState<SignalResult | null>(null);
 
   const addNotificationLog = useCallback((log: NotificationLog) => {
     setNotificationLogs(prev => [log, ...prev].slice(0, 50)); // Keep last 50
@@ -957,6 +966,194 @@ export default function Home() {
       console.error('Scanner error:', e);
     } finally {
       setScanning(false);
+    }
+  }, []);
+
+  // Signal Scanner - Full multi-timeframe analysis
+  const runSignalScanner = useCallback(async () => {
+    setSignalScanning(true);
+    const results: SignalResult[] = [];
+    
+    try {
+      // Get top coins by volume
+      const tickerRes = await fetch('https://api.binance.com/api/v3/ticker/24hr');
+      const tickerData = await tickerRes.json();
+      const top50 = tickerData
+        .filter((t: { symbol: string }) => t.symbol.endsWith('USDT'))
+        .sort((a: { quoteVolume: string }, b: { quoteVolume: string }) => 
+          parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
+        .slice(0, 50)
+        .map((t: { symbol: string; lastPrice: string }) => ({ 
+          symbol: t.symbol, 
+          price: parseFloat(t.lastPrice) 
+        }));
+
+      for (const { symbol, price } of top50) {
+        const timeframes: Record<string, TimeframeAnalysis> = {};
+        const tfConfigs = [
+          { label: '1m', interval: '1m' },
+          { label: '5m', interval: '5m' },
+          { label: '15m', interval: '15m' },
+          { label: '1h', interval: '1h' },
+          { label: '4h', interval: '4h' },
+          { label: '1d', interval: '1d' },
+        ];
+
+        // Fetch all timeframes
+        for (const tf of tfConfigs) {
+          try {
+            const res = await fetch(
+              `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${tf.interval}&limit=220`
+            );
+            const klines = await res.json();
+            if (!Array.isArray(klines) || klines.length < 15) continue;
+
+            const closes = klines.map((k: (string | number)[]) => parseFloat(String(k[4])));
+            
+            // Calculate RSI values for different periods
+            const calcRSI = (period: number): { current: number | null; prev: number | null } => {
+              if (closes.length < period + 2) return { current: null, prev: null };
+              const rsiArr = calculateRSIArray(closes, period);
+              if (rsiArr.length < 2) return { current: null, prev: null };
+              return { 
+                current: rsiArr[rsiArr.length - 1], 
+                prev: rsiArr[rsiArr.length - 2] 
+              };
+            };
+
+            const rsi5 = calcRSI(5);
+            const rsi9 = calcRSI(9);
+            const rsi14 = calcRSI(14);
+            const rsi50 = calcRSI(50);
+            const rsi75 = calcRSI(75);
+            const rsi100 = calcRSI(100);
+            const rsi200 = calcRSI(200);
+
+            const rsi14Rising = rsi14.current !== null && rsi14.prev !== null && rsi14.current > rsi14.prev;
+            const rsi14Falling = rsi14.current !== null && rsi14.prev !== null && rsi14.current < rsi14.prev;
+
+            // Detect momentum flips
+            const bullFlip = detectBullFlip(rsi5.current, rsi9.current, rsi5.prev, rsi9.prev, rsi14Rising);
+            const bearFlip = detectBearFlip(rsi5.current, rsi9.current, rsi5.prev, rsi9.prev, rsi14Falling);
+
+            timeframes[tf.label] = {
+              timeframe: tf.label,
+              trendState: calculateTrendState(rsi14.current, rsi50.current, rsi200.current),
+              stretchState: calculateStretchState(rsi5.current, rsi9.current),
+              rsi5: rsi5.current,
+              rsi9: rsi9.current,
+              rsi14: rsi14.current,
+              rsi14Prev: rsi14.prev,
+              rsi50: rsi50.current,
+              rsi75: rsi75.current,
+              rsi100: rsi100.current,
+              rsi200: rsi200.current,
+              bullFlip,
+              bearFlip,
+              rsi14Rising,
+              rsi14Falling
+            };
+          } catch {}
+          await new Promise(r => setTimeout(r, 30)); // Rate limiting
+        }
+
+        // Skip if we don't have enough timeframes
+        if (!timeframes['4h'] || !timeframes['1h'] || !timeframes['1d']) continue;
+
+        // Calculate biases
+        const swingBias = calculateSwingBias(timeframes['1d'].trendState, timeframes['4h'].trendState);
+        const scalpBias = calculateScalpBias(timeframes['1h'].trendState, timeframes['4h'].trendState);
+        
+        // Calculate regime
+        const regime = calculateRegime(
+          timeframes['4h'].rsi75, timeframes['4h'].rsi100, timeframes['4h'].rsi200,
+          timeframes['1d'].rsi75, timeframes['1d'].rsi100, timeframes['1d'].rsi200
+        );
+
+        // Check for signals
+        let signal: SignalType = null;
+        let reasons: string[] = [];
+        let confidence = 0;
+
+        // Check swing signals first (higher priority)
+        if (swingBias === 'long_only') {
+          const swingLong = checkSwingLong(swingBias, timeframes['4h'], timeframes['1h'], null);
+          if (swingLong.valid) {
+            signal = 'swing_long';
+            reasons = swingLong.reasons;
+            confidence = calculateConfidence(
+              swingBias, timeframes['1d'].rsi14, timeframes['4h'].rsi14,
+              timeframes['4h'].rsi5, timeframes['4h'].rsi9,
+              true, timeframes['1h'].rsi14Rising, true, timeframes['1h'].rsi14
+            );
+          }
+        } else if (swingBias === 'short_only') {
+          const swingShort = checkSwingShort(swingBias, timeframes['4h'], timeframes['1h'], null);
+          if (swingShort.valid) {
+            signal = 'swing_short';
+            reasons = swingShort.reasons;
+            confidence = calculateConfidence(
+              swingBias, timeframes['1d'].rsi14, timeframes['4h'].rsi14,
+              timeframes['4h'].rsi5, timeframes['4h'].rsi9,
+              true, timeframes['1h'].rsi14Falling, true, timeframes['1h'].rsi14
+            );
+          }
+        }
+
+        // Check scalp signals if no swing signal
+        if (!signal && timeframes['5m'] && timeframes['15m']) {
+          if (scalpBias === 'long_only') {
+            const scalpLong = checkScalpLong(scalpBias, timeframes['5m'], timeframes['1m'] || null, timeframes['15m']);
+            if (scalpLong.valid) {
+              signal = 'scalp_long';
+              reasons = scalpLong.reasons;
+              confidence = calculateConfidence(
+                scalpBias, timeframes['1d'].rsi14, timeframes['4h'].rsi14,
+                timeframes['5m'].rsi5, timeframes['5m'].rsi9,
+                timeframes['5m'].bullFlip || (timeframes['1m']?.bullFlip ?? false),
+                timeframes['15m'].rsi14 !== null && timeframes['15m'].rsi14 >= 45,
+                false
+              );
+            }
+          } else if (scalpBias === 'short_only') {
+            const scalpShort = checkScalpShort(scalpBias, timeframes['5m'], timeframes['1m'] || null, timeframes['15m']);
+            if (scalpShort.valid) {
+              signal = 'scalp_short';
+              reasons = scalpShort.reasons;
+              confidence = calculateConfidence(
+                scalpBias, timeframes['1d'].rsi14, timeframes['4h'].rsi14,
+                timeframes['5m'].rsi5, timeframes['5m'].rsi9,
+                timeframes['5m'].bearFlip || (timeframes['1m']?.bearFlip ?? false),
+                timeframes['15m'].rsi14 !== null && timeframes['15m'].rsi14 <= 55,
+                false
+              );
+            }
+          }
+        }
+
+        // Only add if there's a signal with decent confidence
+        if (signal && confidence >= 50) {
+          results.push({
+            symbol: symbol.replace('USDT', ''),
+            swingBias,
+            scalpBias,
+            regime,
+            signal,
+            confidence,
+            reasons,
+            timeframes,
+            divergence: null
+          });
+        }
+      }
+
+      // Sort by confidence
+      results.sort((a, b) => b.confidence - a.confidence);
+      setSignalResults(results.slice(0, 20));
+    } catch (e) {
+      console.error('Signal scanner error:', e);
+    } finally {
+      setSignalScanning(false);
     }
   }, []);
 
@@ -1474,6 +1671,296 @@ export default function Home() {
             </div>
           )}
         </div>
+
+        {/* MTF Signal Dashboard */}
+        <div className="mt-6 border border-zinc-800 rounded-lg overflow-hidden">
+          <div className="bg-zinc-900 px-4 py-3 flex items-center justify-between border-b border-zinc-800">
+            <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+              <Activity className="h-4 w-4 text-cyan-400" />
+              MTF Signal Dashboard
+              <span className="text-xs text-zinc-400 font-normal ml-2">
+                (Trend + Stretch + Flip)
+              </span>
+            </h3>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={runSignalScanner}
+              disabled={signalScanning}
+              className="gap-2 border-cyan-600 text-cyan-400 hover:bg-cyan-900/20"
+            >
+              {signalScanning ? (
+                <>
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  Analyzing...
+                </>
+              ) : (
+                <>
+                  <Activity className="h-4 w-4" />
+                  Scan Signals
+                </>
+              )}
+            </Button>
+          </div>
+          
+          {signalResults.length > 0 ? (
+            <div className="max-h-96 overflow-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-zinc-900/50 border-zinc-800">
+                    <TableHead className="text-white">Coin</TableHead>
+                    <TableHead className="text-white text-center">Signal</TableHead>
+                    <TableHead className="text-white text-center">Confidence</TableHead>
+                    <TableHead className="text-white text-center">Swing Bias</TableHead>
+                    <TableHead className="text-white text-center">Scalp Bias</TableHead>
+                    <TableHead className="text-white text-center">Regime</TableHead>
+                    <TableHead className="text-white">Analysis</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {signalResults.map((result) => (
+                    <TableRow 
+                      key={result.symbol}
+                      className={`border-zinc-800/50 cursor-pointer hover:bg-zinc-900/50 ${
+                        result.signal?.includes('long') ? 'bg-emerald-900/10' : 'bg-red-900/10'
+                      }`}
+                      onClick={() => setSelectedSignal(result)}
+                    >
+                      <TableCell>
+                        <div className="font-semibold text-white">{result.symbol}</div>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <span className={`px-2 py-1 rounded text-xs font-bold ${
+                          result.signal === 'swing_long' ? 'bg-emerald-600 text-white' :
+                          result.signal === 'swing_short' ? 'bg-red-600 text-white' :
+                          result.signal === 'scalp_long' ? 'bg-emerald-700 text-white' :
+                          result.signal === 'scalp_short' ? 'bg-red-700 text-white' :
+                          'bg-zinc-700 text-white'
+                        }`}>
+                          {result.signal === 'swing_long' ? '🟢 SWING LONG' :
+                           result.signal === 'swing_short' ? '🔴 SWING SHORT' :
+                           result.signal === 'scalp_long' ? '🟢 SCALP LONG' :
+                           result.signal === 'scalp_short' ? '🔴 SCALP SHORT' :
+                           'NONE'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <span className={`font-mono font-bold ${
+                          result.confidence >= 75 ? 'text-emerald-400' :
+                          result.confidence >= 60 ? 'text-yellow-400' :
+                          'text-zinc-400'
+                        }`}>
+                          {result.confidence}
+                          {result.confidence >= 75 && ' ⭐'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <span className={`text-xs px-1.5 py-0.5 rounded ${
+                          result.swingBias === 'long_only' ? 'bg-emerald-800 text-emerald-200' :
+                          result.swingBias === 'short_only' ? 'bg-red-800 text-red-200' :
+                          'bg-zinc-700 text-zinc-300'
+                        }`}>
+                          {result.swingBias === 'long_only' ? 'LONG' :
+                           result.swingBias === 'short_only' ? 'SHORT' : 'NO TRADE'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <span className={`text-xs px-1.5 py-0.5 rounded ${
+                          result.scalpBias === 'long_only' ? 'bg-emerald-800 text-emerald-200' :
+                          result.scalpBias === 'short_only' ? 'bg-red-800 text-red-200' :
+                          'bg-zinc-700 text-zinc-300'
+                        }`}>
+                          {result.scalpBias === 'long_only' ? 'LONG' :
+                           result.scalpBias === 'short_only' ? 'SHORT' : 'NO TRADE'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <span className={`text-xs px-1.5 py-0.5 rounded ${
+                          result.regime === 'bull_regime' ? 'bg-emerald-900 text-emerald-300' :
+                          result.regime === 'bear_regime' ? 'bg-red-900 text-red-300' :
+                          'bg-yellow-900 text-yellow-300'
+                        }`}>
+                          {result.regime === 'bull_regime' ? '🐂 BULL' :
+                           result.regime === 'bear_regime' ? '🐻 BEAR' : '⚠️ CHOP'}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-xs text-zinc-400 max-w-[200px] truncate">
+                          {result.reasons[0]}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          ) : (
+            <div className="px-4 py-8 text-center text-zinc-500">
+              <Activity className="h-8 w-8 mx-auto mb-2 opacity-50" />
+              <p>Click "Scan Signals" for multi-timeframe analysis</p>
+              <p className="text-xs mt-1 max-w-md mx-auto">
+                Analyzes Trend State (RSI14/50/200), Stretch (RSI5/9), and Momentum Flips across all timeframes to generate swing and scalp signals
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Signal Detail Modal */}
+        <Dialog open={!!selectedSignal} onOpenChange={(o) => !o && setSelectedSignal(null)}>
+          <DialogContent className="max-w-3xl max-h-[85vh] overflow-auto bg-zinc-950 border-zinc-800">
+            {selectedSignal && (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-3 text-white">
+                    <span className="text-2xl font-bold">{selectedSignal.symbol}</span>
+                    <span className={`px-3 py-1 rounded text-sm font-bold ${
+                      selectedSignal.signal?.includes('long') ? 'bg-emerald-600' : 'bg-red-600'
+                    } text-white`}>
+                      {selectedSignal.signal?.replace('_', ' ').toUpperCase()}
+                    </span>
+                    <span className={`font-mono ${
+                      selectedSignal.confidence >= 75 ? 'text-emerald-400' : 'text-yellow-400'
+                    }`}>
+                      {selectedSignal.confidence}% {selectedSignal.confidence >= 75 ? '⭐ A+' : ''}
+                    </span>
+                  </DialogTitle>
+                </DialogHeader>
+
+                <div className="space-y-4">
+                  {/* Bias & Regime Summary */}
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className={`rounded-lg p-3 border ${
+                      selectedSignal.swingBias === 'long_only' ? 'bg-emerald-900/30 border-emerald-800' :
+                      selectedSignal.swingBias === 'short_only' ? 'bg-red-900/30 border-red-800' :
+                      'bg-zinc-900/50 border-zinc-700'
+                    }`}>
+                      <p className="text-xs text-zinc-400 mb-1">Swing Bias</p>
+                      <p className="text-white font-semibold">
+                        {selectedSignal.swingBias === 'long_only' ? '🟢 Long Only' :
+                         selectedSignal.swingBias === 'short_only' ? '🔴 Short Only' : '⚪ No Trade'}
+                      </p>
+                      <p className="text-xs text-zinc-500">1D + 4H trend aligned</p>
+                    </div>
+                    <div className={`rounded-lg p-3 border ${
+                      selectedSignal.scalpBias === 'long_only' ? 'bg-emerald-900/30 border-emerald-800' :
+                      selectedSignal.scalpBias === 'short_only' ? 'bg-red-900/30 border-red-800' :
+                      'bg-zinc-900/50 border-zinc-700'
+                    }`}>
+                      <p className="text-xs text-zinc-400 mb-1">Scalp Bias</p>
+                      <p className="text-white font-semibold">
+                        {selectedSignal.scalpBias === 'long_only' ? '🟢 Long Only' :
+                         selectedSignal.scalpBias === 'short_only' ? '🔴 Short Only' : '⚪ No Trade'}
+                      </p>
+                      <p className="text-xs text-zinc-500">1H or 4H trend</p>
+                    </div>
+                    <div className={`rounded-lg p-3 border ${
+                      selectedSignal.regime === 'bull_regime' ? 'bg-emerald-900/30 border-emerald-800' :
+                      selectedSignal.regime === 'bear_regime' ? 'bg-red-900/30 border-red-800' :
+                      'bg-yellow-900/30 border-yellow-800'
+                    }`}>
+                      <p className="text-xs text-zinc-400 mb-1">Market Regime</p>
+                      <p className="text-white font-semibold">
+                        {selectedSignal.regime === 'bull_regime' ? '🐂 Bull Regime' :
+                         selectedSignal.regime === 'bear_regime' ? '🐻 Bear Regime' : '⚠️ Transition'}
+                      </p>
+                      <p className="text-xs text-zinc-500">RSI 75/100/200 filter</p>
+                    </div>
+                  </div>
+
+                  {/* Signal Reasons */}
+                  <div className="bg-zinc-900/50 rounded-lg p-4 border border-zinc-800">
+                    <p className="text-sm text-zinc-400 mb-2">📋 Signal Checklist</p>
+                    <ul className="space-y-1">
+                      {selectedSignal.reasons.map((reason, i) => (
+                        <li key={i} className={`text-sm ${
+                          reason.startsWith('✓') ? 'text-emerald-400' :
+                          reason.startsWith('✗') ? 'text-red-400' :
+                          reason.startsWith('⚠') ? 'text-yellow-400' :
+                          reason.startsWith('⭐') ? 'text-purple-400' :
+                          'text-white'
+                        }`}>
+                          {reason}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {/* Timeframe Breakdown */}
+                  <div className="bg-zinc-900/30 rounded-lg p-4 border border-zinc-800/50">
+                    <p className="text-sm text-zinc-400 mb-3">📊 Timeframe Analysis</p>
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="border-zinc-800">
+                            <TableHead className="text-white">TF</TableHead>
+                            <TableHead className="text-white text-center">Trend</TableHead>
+                            <TableHead className="text-white text-center">Stretch</TableHead>
+                            <TableHead className="text-white text-center">RSI5</TableHead>
+                            <TableHead className="text-white text-center">RSI9</TableHead>
+                            <TableHead className="text-white text-center">RSI14</TableHead>
+                            <TableHead className="text-white text-center">RSI50</TableHead>
+                            <TableHead className="text-white text-center">Flip</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {['1m', '5m', '15m', '1h', '4h', '1d'].map(tf => {
+                            const data = selectedSignal.timeframes[tf];
+                            if (!data) return null;
+                            return (
+                              <TableRow key={tf} className="border-zinc-800/50">
+                                <TableCell className="font-medium text-white">{tf}</TableCell>
+                                <TableCell className="text-center">
+                                  <span className={`text-xs px-1.5 py-0.5 rounded ${
+                                    data.trendState === 'bull' ? 'bg-emerald-800 text-emerald-200' :
+                                    data.trendState === 'bear' ? 'bg-red-800 text-red-200' :
+                                    'bg-zinc-700 text-zinc-300'
+                                  }`}>
+                                    {data.trendState.toUpperCase()}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  <span className={`text-xs px-1.5 py-0.5 rounded ${
+                                    data.stretchState === 'oversold' ? 'bg-emerald-800 text-emerald-200' :
+                                    data.stretchState === 'overbought' ? 'bg-red-800 text-red-200' :
+                                    'bg-zinc-700 text-zinc-300'
+                                  }`}>
+                                    {data.stretchState === 'oversold' ? 'OS' :
+                                     data.stretchState === 'overbought' ? 'OB' : '-'}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-center font-mono text-xs">
+                                  <RSICell value={data.rsi5} />
+                                </TableCell>
+                                <TableCell className="text-center font-mono text-xs">
+                                  <RSICell value={data.rsi9} />
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  <span className="font-mono text-xs text-white">
+                                    {data.rsi14?.toFixed(1) ?? '-'}
+                                    {data.rsi14Rising && <span className="text-emerald-400 ml-1">↑</span>}
+                                    {data.rsi14Falling && <span className="text-red-400 ml-1">↓</span>}
+                                  </span>
+                                </TableCell>
+                                <TableCell className="text-center font-mono text-xs text-white">
+                                  {data.rsi50?.toFixed(1) ?? '-'}
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  {data.bullFlip && <span className="text-emerald-400 text-xs">🟢 BULL</span>}
+                                  {data.bearFlip && <span className="text-red-400 text-xs">🔴 BEAR</span>}
+                                  {!data.bullFlip && !data.bearFlip && <span className="text-zinc-500 text-xs">-</span>}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+          </DialogContent>
+        </Dialog>
 
         {/* Alert Performance Tracking */}
         {alertPerformance.length > 0 && (
